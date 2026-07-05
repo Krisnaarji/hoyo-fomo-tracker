@@ -1,0 +1,15 @@
+[Unit]
+Description=HoYo FOMO Tracker Discord Bot
+After=network-online.target hoyo-api.service
+Wants=network-online.target
+
+[Service]
+User=nasana
+WorkingDirectory=/home/nasana/hoyo-tracker
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/home/nasana/hoyo-tracker/.venv/bin/python -m app.discord_bot
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
