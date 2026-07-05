@@ -347,6 +347,11 @@ class HoyoBot(commands.Bot):
 
         if guild_id:
             guild = discord.Object(id=int(guild_id))
+
+            # Copy globally-defined commands like /hoyo into this private server
+            # so they appear immediately instead of waiting for global sync.
+            self.tree.copy_global_to(guild=guild)
+
             synced = await self.tree.sync(guild=guild)
             print(f"Synced {len(synced)} command(s) to guild {guild_id}")
         else:
