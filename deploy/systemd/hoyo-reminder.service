@@ -1,0 +1,11 @@
+[Unit]
+Description=HoYo FOMO Tracker Reminder Check
+After=network-online.target hoyo-api.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=nasana
+WorkingDirectory=/home/nasana/hoyo-tracker
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/home/nasana/hoyo-tracker/.venv/bin/python -m scripts.reminder_check --send-discord --mark-sent
