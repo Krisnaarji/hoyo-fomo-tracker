@@ -1,12 +1,24 @@
 import argparse
+import json
 from datetime import datetime, timezone
+from pathlib import Path
 
 from app.db import get_conn, init_db
 from app.scraper import scrape_url
 
+BASE_DIR = Path(__file__).resolve().parent.parent
+SOURCES_PATH = BASE_DIR / "config" / "sources.json"
+
 
 def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def load_sources():
+    if not SOURCES_PATH.exists():
+        raise FileNotFoundError(f"Source config not found: {SOURCES_PATH}")
+
+    return json.loads(SOURCES_PATH.read_text())
 
 
 def get_snapshot(conn, game_title: str, source_url: str):
@@ -80,10 +92,8 @@ def update_snapshot_changed(conn, snapshot_id: int, content_hash: str, content_l
     )
 
 
-def check_source(game_title: str, url: str):
+def check_source(game_title: str, url: str, name: str | None = None):
     page = scrape_url(url)
-
-    init_db()
 
     with get_conn() as conn:
         snapshot = get_snapshot(conn, game_title, url)
@@ -114,8 +124,11 @@ def check_source(game_title: str, url: str):
             conn.commit()
             status = "UNCHANGED"
 
+    print("=" * 70)
     print(f"Status: {status}")
     print(f"Game: {game_title}")
+    if name:
+        print(f"Name: {name}")
     print(f"URL: {url}")
     print(f"Title: {page.title}")
     print(f"Content length: {page.content_length}")
@@ -126,29 +139,74 @@ def check_source(game_title: str, url: str):
         print("Preview:")
         print(page.text[:700])
 
+    return status
+
+
+def check_all_sources():
+    sources = load_sources()
+
+    results = {
+        "NEW": 0,
+        "CHANGED": 0,
+        "UNCHANGED": 0,
+        "ERROR": 0,
+    }
+
+    for source in sources:
+        try:
+            status = check_source(
+                game_title=source["game_title"],
+                name=source.get("name"),
+                url=source["url"],
+            )
+            results[status] += 1
+
+        except Exception as exc:
+            results["ERROR"] += 1
+            print("=" * 70)
+            print("Status: ERROR")
+            print(f"Game: {source.get('game_title', 'Unknown')}")
+            print(f"Name: {source.get('name', 'Unknown')}")
+            print(f"URL: {source.get('url', 'Unknown')}")
+            print(f"Error: {exc}")
+
+    print("=" * 70)
+    print("Summary:")
+    for key, value in results.items():
+        print(f"{key}: {value}")
+
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Check whether a source page changed since the last scrape."
+        description="Check whether source pages changed since the last scrape."
+    )
+
+    parser.add_argument(
+        "--all",
+        action="store_true",
+        help="Check all sources from config/sources.json.",
     )
     parser.add_argument(
         "--game",
-        required=True,
         help="Game title, e.g. Genshin, HSR, or ZZZ.",
     )
     parser.add_argument(
         "--url",
-        required=True,
         help="Source URL to scrape and hash.",
     )
 
     args = parser.parse_args()
 
-    try:
-        check_source(args.game, args.url)
-    except Exception as exc:
-        print(f"ERROR: {exc}")
-        raise SystemExit(1)
+    init_db()
+
+    if args.all:
+        check_all_sources()
+        return
+
+    if not args.game or not args.url:
+        parser.error("Either use --all or provide both --game and --url.")
+
+    check_source(args.game, args.url)
 
 
 if __name__ == "__main__":
