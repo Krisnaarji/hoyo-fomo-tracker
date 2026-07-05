@@ -1,3 +1,4 @@
+import argparse
 from datetime import date, datetime, timezone
 from zoneinfo import ZoneInfo
 
@@ -14,12 +15,9 @@ def parse_date(value):
     if not value:
         return None
 
-    # Handles "2026-07-04"
     if len(value) == 10:
         return date.fromisoformat(value)
 
-    # Handles "2026-07-04T14:21:14+00:00"
-    # Also handles old SQLite "2026-07-04 13:02:01"
     try:
         dt = datetime.fromisoformat(value)
     except ValueError:
@@ -67,6 +65,9 @@ def reminder_already_logged(conn, event_id, reminder_type):
 
 
 def log_reminder(conn, event_id, reminder_type):
+    if reminder_already_logged(conn, event_id, reminder_type):
+        return False
+
     conn.execute(
         """
         INSERT INTO reminder_log (
@@ -83,6 +84,8 @@ def log_reminder(conn, event_id, reminder_type):
         ),
     )
 
+    return True
+
 
 def build_reminders(conn, event, today):
     reminders = []
@@ -94,7 +97,10 @@ def build_reminders(conn, event, today):
     if category == "DAILY":
         reminder_type = f"DAILY_{today.isoformat()}"
 
-        if not daily_checkin_done_today(event, today):
+        if (
+            not daily_checkin_done_today(event, today)
+            and not reminder_already_logged(conn, event_id, reminder_type)
+        ):
             reminders.append(
                 {
                     "event_id": event_id,
@@ -107,7 +113,6 @@ def build_reminders(conn, event, today):
             )
 
     elif category == "HEAVY":
-        # Saturday = 5, Sunday = 6
         if today.weekday() in {5, 6}:
             reminder_type = f"HEAVY_WEEKEND_{today.isoformat()}"
 
@@ -163,7 +168,33 @@ def build_reminders(conn, event, today):
     return reminders
 
 
+def print_reminders(today, active_count, reminders):
+    print(f"Local date: {today.isoformat()}")
+    print(f"Active events checked: {active_count}")
+
+    if not reminders:
+        print("No reminders needed.")
+        return
+
+    print(f"Reminders needed: {len(reminders)}")
+
+    for reminder in reminders:
+        print()
+        print(f"[{reminder['category_tag']}] {reminder['game_title']} - {reminder['event_name']}")
+        print(f"Event ID: {reminder['event_id']}")
+        print(f"Type: {reminder['reminder_type']}")
+        print(f"Message: {reminder['message']}")
+
+
 def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--mark-sent",
+        action="store_true",
+        help="Save generated reminders into reminder_log to prevent duplicate reminders.",
+    )
+    args = parser.parse_args()
+
     init_db()
     today = today_local()
 
@@ -178,25 +209,22 @@ def main():
 
         active_events = [row for row in rows if is_active_event(row, today)]
 
-        all_reminders = []
+        reminders = []
         for event in active_events:
-            all_reminders.extend(build_reminders(conn, event, today))
+            reminders.extend(build_reminders(conn, event, today))
 
-    print(f"Local date: {today.isoformat()}")
-    print(f"Active events checked: {len(active_events)}")
+        print_reminders(today, len(active_events), reminders)
 
-    if not all_reminders:
-        print("No reminders needed.")
-        return
+        if args.mark_sent and reminders:
+            logged = 0
 
-    print(f"Reminders needed: {len(all_reminders)}")
+            for reminder in reminders:
+                if log_reminder(conn, reminder["event_id"], reminder["reminder_type"]):
+                    logged += 1
 
-    for reminder in all_reminders:
-        print()
-        print(f"[{reminder['category_tag']}] {reminder['game_title']} - {reminder['event_name']}")
-        print(f"Event ID: {reminder['event_id']}")
-        print(f"Type: {reminder['reminder_type']}")
-        print(f"Message: {reminder['message']}")
+            conn.commit()
+            print()
+            print(f"Marked reminders as sent: {logged}")
 
 
 if __name__ == "__main__":
