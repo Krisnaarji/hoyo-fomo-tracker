@@ -1,17 +1,17 @@
 [
   {
     "game_title": "Genshin",
-    "name": "Genshin Official Notices",
-    "url": "https://www.hoyolab.com/circles/2/27/official"
+    "name": "Genshin Fandom Events",
+    "url": "https://genshin-impact.fandom.com/api.php?action=parse&page=Event&prop=text&format=json"
   },
   {
     "game_title": "HSR",
-    "name": "HSR Official Notices",
-    "url": "https://www.hoyolab.com/circles/6/39/official"
+    "name": "HSR Fandom Events",
+    "url": "https://honkai-star-rail.fandom.com/api.php?action=parse&page=Events&prop=text&format=json"
   },
   {
     "game_title": "ZZZ",
-    "name": "ZZZ Official Notices",
-    "url": "https://www.hoyolab.com/circles/8/49/official"
+    "name": "ZZZ Fandom Events",
+    "url": "https://zenless-zone-zero.fandom.com/api.php?action=parse&page=Event&prop=text&format=json"
   }
 ]
