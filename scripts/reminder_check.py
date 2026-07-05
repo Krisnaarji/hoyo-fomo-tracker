@@ -113,6 +113,7 @@ def build_reminders(conn, event, today):
             )
 
     elif category == "HEAVY":
+        # Saturday = 5, Sunday = 6
         if today.weekday() in {5, 6}:
             reminder_type = f"HEAVY_WEEKEND_{today.isoformat()}"
 
