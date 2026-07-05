@@ -3,6 +3,7 @@ from datetime import date, datetime, timezone
 from zoneinfo import ZoneInfo
 
 from app.db import get_conn, init_db
+from app.notifiers import send_discord_webhook
 
 LOCAL_TZ = ZoneInfo("Asia/Makassar")
 
@@ -113,7 +114,6 @@ def build_reminders(conn, event, today):
             )
 
     elif category == "HEAVY":
-        # Saturday = 5, Sunday = 6
         if today.weekday() in {5, 6}:
             reminder_type = f"HEAVY_WEEKEND_{today.isoformat()}"
 
@@ -169,6 +169,20 @@ def build_reminders(conn, event, today):
     return reminders
 
 
+def format_discord_message(reminder):
+    emoji = {
+        "DAILY": "⚠️",
+        "HEAVY": "🔥",
+        "SPEEDRUN": "⚡",
+    }.get(reminder["category_tag"], "📌")
+
+    return (
+        f"{emoji} **{reminder['game_title']} — {reminder['event_name']}**\n"
+        f"{reminder['message']}\n"
+        f"Event ID: `{reminder['event_id']}` | Type: `{reminder['reminder_type']}`"
+    )
+
+
 def print_reminders(today, active_count, reminders):
     print(f"Local date: {today.isoformat()}")
     print(f"Active events checked: {active_count}")
@@ -194,6 +208,11 @@ def main():
         action="store_true",
         help="Save generated reminders into reminder_log to prevent duplicate reminders.",
     )
+    parser.add_argument(
+        "--send-discord",
+        action="store_true",
+        help="Send generated reminders to Discord webhook.",
+    )
     args = parser.parse_args()
 
     init_db()
@@ -216,10 +235,34 @@ def main():
 
         print_reminders(today, len(active_events), reminders)
 
-        if args.mark_sent and reminders:
-            logged = 0
+        if not reminders:
+            return
+
+        sent_reminders = []
+
+        if args.send_discord:
+            failed = 0
 
             for reminder in reminders:
+                try:
+                    send_discord_webhook(format_discord_message(reminder))
+                    sent_reminders.append(reminder)
+                    print(f"Sent Discord reminder: {reminder['reminder_type']}")
+                except RuntimeError as exc:
+                    failed += 1
+                    print(f"Failed Discord reminder: {reminder['reminder_type']}")
+                    print(f"Reason: {exc}")
+
+            if failed:
+                print(f"Discord send failures: {failed}")
+
+        else:
+            sent_reminders = reminders
+
+        if args.mark_sent and sent_reminders:
+            logged = 0
+
+            for reminder in sent_reminders:
                 if log_reminder(conn, reminder["event_id"], reminder["reminder_type"]):
                     logged += 1
 
