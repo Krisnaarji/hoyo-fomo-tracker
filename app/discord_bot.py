@@ -326,11 +326,18 @@ class HoyoEventSelect(discord.ui.Select):
             return
 
         next_view = EventActionView(event)
+        extra = ""
+
         if len(next_view.children) == 0:
             next_view = None
 
+            if event["category_tag"] == "DAILY" and daily_checkin_done_today(event):
+                extra = "\n\n✅ Already checked in today."
+            elif event["is_muted"] or int(event["progress_status"]) >= 100:
+                extra = "\n\n✅ This event is already completed."
+
         await interaction.response.edit_message(
-            content=format_event_card(event),
+            content=format_event_card(event) + extra,
             view=next_view,
         )
 
