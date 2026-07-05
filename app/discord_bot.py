@@ -24,6 +24,29 @@ def today_local() -> date:
     return datetime.now(LOCAL_TZ).date()
 
 
+def parse_date(value):
+    if not value:
+        return None
+
+    if len(value) == 10:
+        return date.fromisoformat(value)
+
+    try:
+        dt = datetime.fromisoformat(value)
+    except ValueError:
+        return None
+
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+
+    return dt.astimezone(LOCAL_TZ).date()
+
+
+def daily_checkin_done_today(event: dict) -> bool:
+    last_checkin = parse_date(event.get("last_daily_checkin"))
+    return last_checkin == today_local()
+
+
 def fetch_active_events():
     today = today_local().isoformat()
 
@@ -141,11 +164,26 @@ def format_event_card(event: dict) -> str:
     )
 
 
+def should_show_actions(event: dict) -> bool:
+    category = event["category_tag"]
+
+    if event["is_muted"] or int(event["progress_status"]) >= 100:
+        return False
+
+    if category == "DAILY" and daily_checkin_done_today(event):
+        return False
+
+    return True
+
+
 class EventActionView(discord.ui.View):
     def __init__(self, event: dict):
         super().__init__(timeout=180)
         self.event = event
         self.event_id = int(event["id"])
+
+        if not should_show_actions(event):
+            return
 
         category = event["category_tag"]
 
@@ -167,6 +205,10 @@ class EventActionView(discord.ui.View):
                 )
 
                 button = discord.ui.Button(label=label, style=style)
+
+                if int(event["progress_status"]) == value:
+                    button.disabled = True
+
                 button.callback = self.make_progress_callback(value)
                 self.add_item(button)
 
@@ -190,7 +232,7 @@ class EventActionView(discord.ui.View):
 
         await interaction.response.edit_message(
             content=format_event_card(updated) + "\n\n✅ Checked in for today.",
-            view=EventActionView(updated),
+            view=None,
         )
 
     def make_progress_callback(self, value: int):
@@ -205,14 +247,17 @@ class EventActionView(discord.ui.View):
                 return
 
             extra = ""
+            next_view = EventActionView(updated)
+
             if value >= 100:
                 extra = "\n\n✅ Completed. Reminders for this event are now muted."
+                next_view = None
             else:
                 extra = f"\n\nProgress updated to {value}%."
 
             await interaction.response.edit_message(
                 content=format_event_card(updated) + extra,
-                view=EventActionView(updated),
+                view=next_view,
             )
 
         return callback
@@ -230,7 +275,7 @@ class EventActionView(discord.ui.View):
         await interaction.response.edit_message(
             content=format_event_card(updated)
             + "\n\n✅ Speedrun event completed. Reminders muted.",
-            view=EventActionView(updated),
+            view=None,
         )
 
 
@@ -280,9 +325,13 @@ class HoyoEventSelect(discord.ui.Select):
             )
             return
 
+        next_view = EventActionView(event)
+        if len(next_view.children) == 0:
+            next_view = None
+
         await interaction.response.edit_message(
             content=format_event_card(event),
-            view=EventActionView(event),
+            view=next_view,
         )
 
 
@@ -298,7 +347,6 @@ class HoyoBot(commands.Bot):
 
         if guild_id:
             guild = discord.Object(id=int(guild_id))
-            self.tree.copy_global_to(guild=guild)
             synced = await self.tree.sync(guild=guild)
             print(f"Synced {len(synced)} command(s) to guild {guild_id}")
         else:
