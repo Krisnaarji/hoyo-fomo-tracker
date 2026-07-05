@@ -1,0 +1,10 @@
+[Unit]
+Description=Run HoYo FOMO Tracker Source Change Checker
+
+[Timer]
+OnCalendar=*-*-* 09:00:00
+Persistent=true
+AccuracySec=5min
+
+[Install]
+WantedBy=timers.target
