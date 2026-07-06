@@ -4,6 +4,13 @@ from zoneinfo import ZoneInfo
 import discord
 from discord.ext import commands
 
+from app.ai_suggestion_review import (
+    accept_ai_suggestion,
+    fetch_pending_ai_suggestions,
+    format_suggestion_summary,
+    get_pending_ai_suggestion,
+    reject_ai_suggestion,
+)
 from app.db import get_conn, init_db, row_to_dict
 from app.settings import get_env
 
@@ -13,6 +20,13 @@ CATEGORY_EMOJI = {
     "DAILY": "⚠️",
     "HEAVY": "🔥",
     "SPEEDRUN": "⚡",
+}
+
+SUGGESTION_EMOJI = {
+    "daily": "⚠️",
+    "heavy": "🔥",
+    "speedrun": "⚡",
+    "info": "ℹ️",
 }
 
 
@@ -348,6 +362,99 @@ class HoyoSelectView(discord.ui.View):
         self.add_item(HoyoEventSelect(events))
 
 
+class SuggestionActionView(discord.ui.View):
+    def __init__(self, suggestion: dict):
+        super().__init__(timeout=180)
+        self.suggestion_id = int(suggestion["id"])
+
+        if suggestion["suggested_category"] != "info":
+            accept_button = discord.ui.Button(
+                label="✅ Accept",
+                style=discord.ButtonStyle.success,
+            )
+            accept_button.callback = self.accept_callback
+            self.add_item(accept_button)
+
+        reject_button = discord.ui.Button(
+            label="🗑️ Reject",
+            style=discord.ButtonStyle.danger,
+        )
+        reject_button.callback = self.reject_callback
+        self.add_item(reject_button)
+
+    async def accept_callback(self, interaction: discord.Interaction):
+        result = accept_ai_suggestion(self.suggestion_id)
+        await interaction.response.edit_message(
+            content=result["message"],
+            view=None,
+        )
+
+    async def reject_callback(self, interaction: discord.Interaction):
+        result = reject_ai_suggestion(self.suggestion_id)
+        await interaction.response.edit_message(
+            content=result["message"],
+            view=None,
+        )
+
+
+class SuggestionSelect(discord.ui.Select):
+    def __init__(self, suggestions: list[dict]):
+        options = []
+
+        for suggestion in suggestions:
+            emoji = SUGGESTION_EMOJI.get(suggestion["suggested_category"], "📌")
+            label = f"{emoji} {suggestion['game_title']}: {suggestion['event_name']}"
+
+            if len(label) > 100:
+                label = label[:97] + "..."
+
+            description = (
+                f"{suggestion['suggested_category']} | "
+                f"{suggestion['start_date'] or 'Unknown'} → "
+                f"{suggestion['end_date'] or 'Unknown'}"
+            )
+
+            if len(description) > 100:
+                description = description[:97] + "..."
+
+            options.append(
+                discord.SelectOption(
+                    label=label,
+                    value=str(suggestion["id"]),
+                    description=description,
+                )
+            )
+
+        super().__init__(
+            placeholder="Choose a pending AI suggestion...",
+            min_values=1,
+            max_values=1,
+            options=options,
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        suggestion_id = int(self.values[0])
+        suggestion = get_pending_ai_suggestion(suggestion_id)
+
+        if not suggestion:
+            await interaction.response.edit_message(
+                content="Suggestion not found or already reviewed.",
+                view=None,
+            )
+            return
+
+        await interaction.response.edit_message(
+            content=format_suggestion_summary(suggestion),
+            view=SuggestionActionView(suggestion),
+        )
+
+
+class SuggestionSelectView(discord.ui.View):
+    def __init__(self, suggestions: list[dict]):
+        super().__init__(timeout=180)
+        self.add_item(SuggestionSelect(suggestions))
+
+
 class HoyoBot(commands.Bot):
     async def setup_hook(self):
         guild_id = get_env("DISCORD_GUILD_ID")
@@ -374,6 +481,24 @@ bot = HoyoBot(command_prefix="!", intents=intents)
 async def on_ready():
     init_db()
     print(f"Logged in as {bot.user}")
+
+
+@bot.tree.command(name="hoyo-suggestions", description="Review pending AI event suggestions")
+async def hoyo_suggestions(interaction: discord.Interaction):
+    suggestions = fetch_pending_ai_suggestions()
+
+    if not suggestions:
+        await interaction.response.send_message(
+            "No pending AI suggestions.",
+            ephemeral=True,
+        )
+        return
+
+    await interaction.response.send_message(
+        "Pending AI suggestions:",
+        view=SuggestionSelectView(suggestions),
+        ephemeral=True,
+    )
 
 
 @bot.tree.command(name="hoyo", description="Show active HoYo events checklist")
