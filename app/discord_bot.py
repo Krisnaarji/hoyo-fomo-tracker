@@ -366,7 +366,7 @@ class HoyoSelectView(discord.ui.View):
 
 class SuggestionActionView(discord.ui.View):
     def __init__(self, suggestion: dict):
-        super().__init__(timeout=180)
+        super().__init__(timeout=None)
         self.suggestion_id = int(suggestion["id"])
 
         if suggestion["suggested_category"] != "info":
@@ -453,7 +453,7 @@ class SuggestionSelect(discord.ui.Select):
 
 class SuggestionSelectView(discord.ui.View):
     def __init__(self, suggestions: list[dict]):
-        super().__init__(timeout=180)
+        super().__init__(timeout=None)
         self.add_item(SuggestionSelect(suggestions))
 
 
