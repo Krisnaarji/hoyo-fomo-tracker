@@ -34,3 +34,21 @@ CREATE TABLE IF NOT EXISTS reminder_log (
     sent_at TEXT NOT NULL,
     FOREIGN KEY(event_id) REFERENCES events(id)
 );
+
+CREATE TABLE IF NOT EXISTS ai_event_suggestions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    game_title TEXT NOT NULL,
+    event_name TEXT NOT NULL,
+    start_date TEXT,
+    end_date TEXT,
+    event_types TEXT,
+    suggested_category TEXT NOT NULL CHECK(suggested_category IN ('daily', 'heavy', 'speedrun', 'info')),
+    reason TEXT,
+    source_url TEXT NOT NULL,
+    source_hash TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'PENDING' CHECK(status IN ('PENDING', 'ACCEPTED', 'REJECTED')),
+    raw_json TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE(game_title, event_name, start_date, end_date, source_hash)
+);
