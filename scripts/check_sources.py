@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from app.ai_event_extractor import extract_events_with_ai
+from app.ai_suggestions import save_ai_event_suggestions
 from app.db import get_conn, init_db
 from app.notifiers import send_discord_webhook
 from app.scraper import scrape_url
@@ -161,17 +162,35 @@ def print_source_result(result: dict):
         print(result["preview"])
 
 
-def print_ai_preview(result: dict):
+def handle_ai_for_result(result: dict, *, preview: bool = False, save: bool = False):
     if result["status"] not in {"NEW", "CHANGED"}:
         return
 
+    if not preview and not save:
+        return
+
     print()
-    print("AI preview:")
+    print("AI extraction:")
     ai_result = extract_events_with_ai(
         result["game_title"],
         result["source_text"],
     )
-    print(json.dumps(ai_result, indent=2, ensure_ascii=False))
+
+    if preview:
+        print(json.dumps(ai_result, indent=2, ensure_ascii=False))
+
+    if save:
+        save_result = save_ai_event_suggestions(
+            game_title=result["game_title"],
+            source_url=result["url"],
+            source_hash=result["content_hash"],
+            ai_result=ai_result,
+        )
+        print(f"Saved AI suggestions: {save_result}")
+
+
+def print_ai_preview(result: dict):
+    handle_ai_for_result(result, preview=True, save=False)
 
 
 def print_error_result(source: dict, exc: Exception):
@@ -221,7 +240,7 @@ def format_discord_error_alert(source: dict, exc: Exception) -> str:
     )
 
 
-def check_all_sources(send_discord: bool = False, ai_preview: bool = False):
+def check_all_sources(send_discord: bool = False, ai_preview: bool = False, ai_save: bool = False):
     sources = load_sources()
 
     results = {
@@ -241,8 +260,8 @@ def check_all_sources(send_discord: bool = False, ai_preview: bool = False):
 
             results[result["status"]] += 1
 
-            if ai_preview:
-                print_ai_preview(result)
+            if ai_preview or ai_save:
+                handle_ai_for_result(result, preview=ai_preview, save=ai_save)
 
             if send_discord and result["status"] in {"NEW", "CHANGED"}:
                 send_discord_webhook(format_discord_source_alert(result))
@@ -293,13 +312,18 @@ def main():
         action="store_true",
         help="Run AI extraction preview only for NEW or CHANGED sources.",
     )
+    parser.add_argument(
+        "--ai-save",
+        action="store_true",
+        help="Run AI extraction for NEW or CHANGED sources and save pending suggestions.",
+    )
 
     args = parser.parse_args()
 
     init_db()
 
     if args.all:
-        check_all_sources(send_discord=args.send_discord, ai_preview=args.ai_preview)
+        check_all_sources(send_discord=args.send_discord, ai_preview=args.ai_preview, ai_save=args.ai_save)
         return
 
     if not args.game or not args.url:
@@ -307,8 +331,8 @@ def main():
 
     result = check_source(args.game, args.url)
 
-    if args.ai_preview:
-        print_ai_preview(result)
+    if args.ai_preview or args.ai_save:
+        handle_ai_for_result(result, preview=args.ai_preview, save=args.ai_save)
 
     if args.send_discord and result["status"] in {"NEW", "CHANGED"}:
         send_discord_webhook(format_discord_source_alert(result))
