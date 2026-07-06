@@ -42,22 +42,46 @@ def get_deepseek_api_key() -> str:
 
 
 def keep_current_and_upcoming_only(source_text: str) -> str:
+    start_markers = [
+        "Current Event Duration Type(s)",
+        "Current Duration Type(s)",
+    ]
+
     end_markers = [
-        " Permanent Event ",
-        " Permanent ",
-        " List of Event Types ",
-        " List of Recurring Events ",
-        " Other Languages ",
-        " Navigation ",
+        "Permanent Event Release Date",
+        "Permanent Event Duration Type(s)",
+        "Permanent Event",
+        "List of Event Types [",
+        "List of Recurring Events [",
+        "Other Languages",
+        "Navigation",
     ]
 
     trimmed = source_text
 
-    for marker in end_markers:
+    for marker in start_markers:
         index = trimmed.find(marker)
         if index != -1:
-            trimmed = trimmed[:index]
+            trimmed = trimmed[index:]
             break
+
+    upcoming_index = trimmed.find("Upcoming Event Duration Type(s)")
+
+    best_end_index = None
+    for marker in end_markers:
+        index = trimmed.find(marker)
+
+        if index == -1:
+            continue
+
+        if upcoming_index != -1 and index < upcoming_index:
+            continue
+
+        if best_end_index is None or index < best_end_index:
+            best_end_index = index
+
+    if best_end_index is not None:
+        trimmed = trimmed[:best_end_index]
 
     return trimmed.strip()
 
