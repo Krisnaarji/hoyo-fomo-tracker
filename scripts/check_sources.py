@@ -3,6 +3,7 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 
+from app.ai_event_extractor import extract_events_with_ai
 from app.db import get_conn, init_db
 from app.notifiers import send_discord_webhook
 from app.scraper import scrape_url
@@ -134,6 +135,7 @@ def check_source(game_title: str, url: str, name: str | None = None):
         "content_length": page.content_length,
         "content_hash": page.content_hash,
         "preview": page.text[:700],
+        "source_text": page.text,
     }
 
     print_source_result(result)
@@ -157,6 +159,19 @@ def print_source_result(result: dict):
         print()
         print("Preview:")
         print(result["preview"])
+
+
+def print_ai_preview(result: dict):
+    if result["status"] not in {"NEW", "CHANGED"}:
+        return
+
+    print()
+    print("AI preview:")
+    ai_result = extract_events_with_ai(
+        result["game_title"],
+        result["source_text"],
+    )
+    print(json.dumps(ai_result, indent=2, ensure_ascii=False))
 
 
 def print_error_result(source: dict, exc: Exception):
@@ -206,7 +221,7 @@ def format_discord_error_alert(source: dict, exc: Exception) -> str:
     )
 
 
-def check_all_sources(send_discord: bool = False):
+def check_all_sources(send_discord: bool = False, ai_preview: bool = False):
     sources = load_sources()
 
     results = {
@@ -225,6 +240,9 @@ def check_all_sources(send_discord: bool = False):
             )
 
             results[result["status"]] += 1
+
+            if ai_preview:
+                print_ai_preview(result)
 
             if send_discord and result["status"] in {"NEW", "CHANGED"}:
                 send_discord_webhook(format_discord_source_alert(result))
@@ -270,19 +288,27 @@ def main():
         action="store_true",
         help="Send Discord alert when a source is NEW, CHANGED, or ERROR.",
     )
+    parser.add_argument(
+        "--ai-preview",
+        action="store_true",
+        help="Run AI extraction preview only for NEW or CHANGED sources.",
+    )
 
     args = parser.parse_args()
 
     init_db()
 
     if args.all:
-        check_all_sources(send_discord=args.send_discord)
+        check_all_sources(send_discord=args.send_discord, ai_preview=args.ai_preview)
         return
 
     if not args.game or not args.url:
         parser.error("Either use --all or provide both --game and --url.")
 
     result = check_source(args.game, args.url)
+
+    if args.ai_preview:
+        print_ai_preview(result)
 
     if args.send_discord and result["status"] in {"NEW", "CHANGED"}:
         send_discord_webhook(format_discord_source_alert(result))
