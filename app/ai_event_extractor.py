@@ -5,6 +5,8 @@ from typing import Any
 
 import requests
 
+from app.gemini_provider import call_gemini_json
+
 try:
     from dotenv import load_dotenv
 except ImportError:
@@ -170,6 +172,25 @@ def call_deepseek_json(prompt: str, model: str = DEFAULT_MODEL, timeout: int = 6
         ) from exc
 
 
+def get_ai_provider() -> str:
+    return os.getenv("AI_PROVIDER", "gemini").strip().lower()
+
+
+def call_ai_json(prompt: str) -> dict[str, Any]:
+    provider = get_ai_provider()
+
+    if provider == "gemini":
+        return call_gemini_json(prompt)
+
+    if provider == "deepseek":
+        return call_deepseek_json(prompt)
+
+    raise DeepSeekConfigError(
+        f"Unsupported AI_PROVIDER: {provider}. Use 'gemini' or 'deepseek'."
+    )
+
+
 def extract_events_with_ai(game_title: str, source_text: str) -> dict[str, Any]:
     prompt = build_event_extraction_prompt(game_title, source_text)
-    return call_deepseek_json(prompt)
+    return call_ai_json(prompt)
+
