@@ -1,29 +1,14 @@
-from app.db import get_conn
+from app.ai_suggestion_review import fetch_pending_ai_suggestions
 
 
 def main():
-    with get_conn() as conn:
-        rows = conn.execute(
-            """
-            SELECT
-                id,
-                game_title,
-                suggested_category,
-                event_name,
-                start_date,
-                end_date,
-                status
-            FROM ai_event_suggestions
-            WHERE status = 'PENDING'
-            ORDER BY game_title, start_date, end_date, event_name
-            """
-        ).fetchall()
+    suggestions = fetch_pending_ai_suggestions()
 
-    if not rows:
+    if not suggestions:
         print("No pending AI suggestions.")
         return
 
-    for row in rows:
+    for row in suggestions:
         print(
             f"[{row['id']}] "
             f"{row['game_title']} | "
