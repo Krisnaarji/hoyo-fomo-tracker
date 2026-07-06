@@ -19,13 +19,13 @@ from app.settings import get_env
 LOCAL_TZ = ZoneInfo("Asia/Makassar")
 
 CATEGORY_EMOJI = {
-    "DAILY": "⚠️",
+    "DAILY": "🎁",
     "HEAVY": "🔥",
     "SPEEDRUN": "⚡",
 }
 
 SUGGESTION_EMOJI = {
-    "daily": "⚠️",
+    "daily": "🎁",
     "heavy": "🔥",
     "speedrun": "⚡",
     "info": "ℹ️",
