@@ -41,7 +41,30 @@ def get_deepseek_api_key() -> str:
     return api_key
 
 
+def keep_current_and_upcoming_only(source_text: str) -> str:
+    end_markers = [
+        " Permanent Event ",
+        " Permanent ",
+        " List of Event Types ",
+        " List of Recurring Events ",
+        " Other Languages ",
+        " Navigation ",
+    ]
+
+    trimmed = source_text
+
+    for marker in end_markers:
+        index = trimmed.find(marker)
+        if index != -1:
+            trimmed = trimmed[:index]
+            break
+
+    return trimmed.strip()
+
+
 def build_event_extraction_prompt(game_title: str, source_text: str) -> str:
+    source_text = keep_current_and_upcoming_only(source_text)
+
     return f"""
 You are helping maintain a personal HoYoverse event reminder tracker.
 
@@ -49,6 +72,7 @@ Game: {game_title}
 
 Task:
 Extract the CURRENT and UPCOMING limited-time events from the source text.
+Ignore permanent events, indefinite events, archived events, navigation text, and unrelated page sections.
 
 Return ONLY valid JSON with this shape:
 
