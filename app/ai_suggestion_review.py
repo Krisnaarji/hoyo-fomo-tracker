@@ -207,3 +207,37 @@ def reject_ai_suggestion(suggestion_id: int):
         "ok": True,
         "message": f"Rejected suggestion {suggestion_id}",
     }
+
+
+def fetch_unposted_ai_suggestions(limit: int = 10):
+    with get_conn() as conn:
+        rows = conn.execute(
+            """
+            SELECT *
+            FROM ai_event_suggestions
+            WHERE status = 'PENDING'
+              AND discord_review_message_id IS NULL
+            ORDER BY created_at ASC, id ASC
+            LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+
+    return [row_to_dict(row) for row in rows]
+
+
+def mark_ai_suggestion_posted(suggestion_id: int, message_id: int | str):
+    timestamp = now_iso()
+
+    with get_conn() as conn:
+        conn.execute(
+            """
+            UPDATE ai_event_suggestions
+            SET discord_review_message_id = ?,
+                discord_posted_at = ?,
+                updated_at = ?
+            WHERE id = ?
+            """,
+            (str(message_id), timestamp, timestamp, suggestion_id),
+        )
+        conn.commit()

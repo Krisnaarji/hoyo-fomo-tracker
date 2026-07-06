@@ -47,6 +47,8 @@ CREATE TABLE IF NOT EXISTS ai_event_suggestions (
     source_url TEXT NOT NULL,
     source_hash TEXT NOT NULL,
     status TEXT NOT NULL DEFAULT 'PENDING' CHECK(status IN ('PENDING', 'ACCEPTED', 'REJECTED')),
+    discord_review_message_id TEXT,
+    discord_posted_at TEXT,
     raw_json TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,

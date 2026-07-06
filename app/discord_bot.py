@@ -2,13 +2,15 @@ from datetime import date, datetime, timezone
 from zoneinfo import ZoneInfo
 
 import discord
-from discord.ext import commands
+from discord.ext import commands, tasks
 
 from app.ai_suggestion_review import (
     accept_ai_suggestion,
     fetch_pending_ai_suggestions,
+    fetch_unposted_ai_suggestions,
     format_suggestion_summary,
     get_pending_ai_suggestion,
+    mark_ai_suggestion_posted,
     reject_ai_suggestion,
 )
 from app.db import get_conn, init_db, row_to_dict
@@ -477,9 +479,38 @@ intents = discord.Intents.default()
 bot = HoyoBot(command_prefix="!", intents=intents)
 
 
+@tasks.loop(minutes=5)
+async def suggestion_review_poster():
+    channel_id = get_env("DISCORD_REVIEW_CHANNEL_ID")
+
+    if not channel_id:
+        return
+
+    suggestions = fetch_unposted_ai_suggestions(limit=5)
+
+    if not suggestions:
+        return
+
+    channel = bot.get_channel(int(channel_id))
+
+    if channel is None:
+        channel = await bot.fetch_channel(int(channel_id))
+
+    for suggestion in suggestions:
+        message = await channel.send(
+            content=format_suggestion_summary(suggestion),
+            view=SuggestionActionView(suggestion),
+        )
+        mark_ai_suggestion_posted(suggestion["id"], message.id)
+
+
 @bot.event
 async def on_ready():
     init_db()
+
+    if not suggestion_review_poster.is_running():
+        suggestion_review_poster.start()
+
     print(f"Logged in as {bot.user}")
 
 
@@ -495,7 +526,7 @@ async def hoyo_suggestions(interaction: discord.Interaction):
         return
 
     await interaction.response.send_message(
-        "Pending AI suggestions:",
+        f"Pending AI suggestions: `{len(suggestions)}`",
         view=SuggestionSelectView(suggestions),
         ephemeral=True,
     )
