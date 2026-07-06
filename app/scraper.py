@@ -6,6 +6,8 @@ from datetime import datetime, timezone
 import requests
 from bs4 import BeautifulSoup
 
+from app.fandom_api import fetch_fandom_parse_text
+
 
 @dataclass
 class ScrapedPage:
@@ -30,6 +32,10 @@ def hash_text(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
+def is_fandom_api_url(url: str) -> bool:
+    return "fandom.com/api.php" in url and "action=parse" in url
+
+
 def extract_text_from_html(html: str) -> tuple[str, str]:
     soup = BeautifulSoup(html, "html.parser")
 
@@ -45,6 +51,17 @@ def extract_text_from_html(html: str) -> tuple[str, str]:
 
 
 def scrape_url(url: str, timeout: int = 20) -> ScrapedPage:
+    if is_fandom_api_url(url):
+        page = fetch_fandom_parse_text(url, timeout=timeout)
+
+        return ScrapedPage(
+            url=url,
+            title=page.title,
+            text=page.text,
+            content_hash=hash_text(page.text),
+            content_length=page.text_length,
+        )
+
     headers = {
         "User-Agent": (
             "Mozilla/5.0 (compatible; HoYoFOMOTracker/0.1; "
