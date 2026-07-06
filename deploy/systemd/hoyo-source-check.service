@@ -8,4 +8,4 @@ Type=oneshot
 User=nasana
 WorkingDirectory=/home/nasana/hoyo-tracker
 Environment=PYTHONUNBUFFERED=1
-ExecStart=/home/nasana/hoyo-tracker/.venv/bin/python -m scripts.check_sources --all
+ExecStart=/home/nasana/hoyo-tracker/.venv/bin/python -m scripts.check_sources --all --send-discord

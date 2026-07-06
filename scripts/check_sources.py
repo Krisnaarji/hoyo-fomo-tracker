@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from app.db import get_conn, init_db
+from app.notifiers import send_discord_webhook
 from app.scraper import scrape_url
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -124,25 +125,88 @@ def check_source(game_title: str, url: str, name: str | None = None):
             conn.commit()
             status = "UNCHANGED"
 
-    print("=" * 70)
-    print(f"Status: {status}")
-    print(f"Game: {game_title}")
-    if name:
-        print(f"Name: {name}")
-    print(f"URL: {url}")
-    print(f"Title: {page.title}")
-    print(f"Content length: {page.content_length}")
-    print(f"Hash: {page.content_hash}")
+    result = {
+        "status": status,
+        "game_title": game_title,
+        "name": name,
+        "url": url,
+        "title": page.title,
+        "content_length": page.content_length,
+        "content_hash": page.content_hash,
+        "preview": page.text[:700],
+    }
 
-    if status in {"NEW", "CHANGED"}:
+    print_source_result(result)
+    return result
+
+
+def print_source_result(result: dict):
+    print("=" * 70)
+    print(f"Status: {result['status']}")
+    print(f"Game: {result['game_title']}")
+
+    if result.get("name"):
+        print(f"Name: {result['name']}")
+
+    print(f"URL: {result['url']}")
+    print(f"Title: {result['title']}")
+    print(f"Content length: {result['content_length']}")
+    print(f"Hash: {result['content_hash']}")
+
+    if result["status"] in {"NEW", "CHANGED"}:
         print()
         print("Preview:")
-        print(page.text[:700])
-
-    return status
+        print(result["preview"])
 
 
-def check_all_sources():
+def print_error_result(source: dict, exc: Exception):
+    print("=" * 70)
+    print("Status: ERROR")
+    print(f"Game: {source.get('game_title', 'Unknown')}")
+    print(f"Name: {source.get('name', 'Unknown')}")
+    print(f"URL: {source.get('url', 'Unknown')}")
+    print(f"Error: {exc}")
+
+
+def format_discord_source_alert(result: dict) -> str:
+    status_emoji = {
+        "NEW": "🆕",
+        "CHANGED": "📡",
+        "ERROR": "🚨",
+    }.get(result["status"], "📌")
+
+    name = result.get("name") or "Unnamed source"
+
+    message = (
+        f"{status_emoji} **HoYo Source {result['status']}**\n"
+        f"Game: `{result['game_title']}`\n"
+        f"Source: **{name}**\n"
+        f"Length: `{result.get('content_length', 'Unknown')}`\n"
+    )
+
+    if result.get("content_hash"):
+        message += f"Hash: `{result['content_hash'][:12]}`\n"
+
+    message += f"URL: {result['url']}"
+
+    return message
+
+
+def format_discord_error_alert(source: dict, exc: Exception) -> str:
+    name = source.get("name", "Unknown")
+    game_title = source.get("game_title", "Unknown")
+    url = source.get("url", "Unknown")
+
+    return (
+        "🚨 **HoYo Source Check ERROR**\n"
+        f"Game: `{game_title}`\n"
+        f"Source: **{name}**\n"
+        f"URL: {url}\n"
+        f"Error: `{exc}`"
+    )
+
+
+def check_all_sources(send_discord: bool = False):
     sources = load_sources()
 
     results = {
@@ -154,21 +218,28 @@ def check_all_sources():
 
     for source in sources:
         try:
-            status = check_source(
+            result = check_source(
                 game_title=source["game_title"],
                 name=source.get("name"),
                 url=source["url"],
             )
-            results[status] += 1
+
+            results[result["status"]] += 1
+
+            if send_discord and result["status"] in {"NEW", "CHANGED"}:
+                send_discord_webhook(format_discord_source_alert(result))
+                print(f"Discord alert sent for {result['status']}: {source.get('name')}")
 
         except Exception as exc:
             results["ERROR"] += 1
-            print("=" * 70)
-            print("Status: ERROR")
-            print(f"Game: {source.get('game_title', 'Unknown')}")
-            print(f"Name: {source.get('name', 'Unknown')}")
-            print(f"URL: {source.get('url', 'Unknown')}")
-            print(f"Error: {exc}")
+            print_error_result(source, exc)
+
+            if send_discord:
+                try:
+                    send_discord_webhook(format_discord_error_alert(source, exc))
+                    print(f"Discord error alert sent: {source.get('name')}")
+                except Exception as discord_exc:
+                    print(f"Failed to send Discord error alert: {discord_exc}")
 
     print("=" * 70)
     print("Summary:")
@@ -194,19 +265,28 @@ def main():
         "--url",
         help="Source URL to scrape and hash.",
     )
+    parser.add_argument(
+        "--send-discord",
+        action="store_true",
+        help="Send Discord alert when a source is NEW, CHANGED, or ERROR.",
+    )
 
     args = parser.parse_args()
 
     init_db()
 
     if args.all:
-        check_all_sources()
+        check_all_sources(send_discord=args.send_discord)
         return
 
     if not args.game or not args.url:
         parser.error("Either use --all or provide both --game and --url.")
 
-    check_source(args.game, args.url)
+    result = check_source(args.game, args.url)
+
+    if args.send_discord and result["status"] in {"NEW", "CHANGED"}:
+        send_discord_webhook(format_discord_source_alert(result))
+        print(f"Discord alert sent for {result['status']}: {args.game}")
 
 
 if __name__ == "__main__":
