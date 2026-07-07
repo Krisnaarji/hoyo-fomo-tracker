@@ -1,0 +1,10 @@
+[Unit]
+Description=Run HoYo FOMO Tracker DB Backup Daily
+
+[Timer]
+OnCalendar=*-*-* 03:30:00
+Persistent=true
+Unit=hoyo-db-backup.service
+
+[Install]
+WantedBy=timers.target
