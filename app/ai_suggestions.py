@@ -48,9 +48,16 @@ def save_ai_event_suggestions(
             suggested_category = normalize_category(event.get("suggested_category"))
             reason = event.get("reason")
 
+            # UNIQUE(game_title, event_name, start_date, end_date, source_hash)
+            # does NOT catch duplicates when start_date/end_date is NULL (SQL
+            # NULL is never equal to NULL), which is common for dateless
+            # events - INSERT OR IGNORE alone would silently re-insert the
+            # same suggestion on every re-scrape. This does a NULL-safe
+            # ("IS" instead of "=") existence check atomically in the same
+            # statement, regardless of the suggestion's review status.
             cursor = conn.execute(
                 """
-                INSERT OR IGNORE INTO ai_event_suggestions (
+                INSERT INTO ai_event_suggestions (
                     game_title,
                     event_name,
                     start_date,
@@ -65,7 +72,15 @@ def save_ai_event_suggestions(
                     created_at,
                     updated_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'PENDING', ?, ?, ?)
+                SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, 'PENDING', ?, ?, ?
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM ai_event_suggestions
+                    WHERE game_title = ?
+                      AND event_name = ?
+                      AND start_date IS ?
+                      AND end_date IS ?
+                      AND source_hash = ?
+                )
                 """,
                 (
                     game_title,
@@ -80,6 +95,11 @@ def save_ai_event_suggestions(
                     json.dumps(event, ensure_ascii=False),
                     timestamp,
                     timestamp,
+                    game_title,
+                    event_name,
+                    start_date,
+                    end_date,
+                    source_hash,
                 ),
             )
 
