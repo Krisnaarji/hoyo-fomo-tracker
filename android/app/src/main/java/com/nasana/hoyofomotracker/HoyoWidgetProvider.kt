@@ -106,7 +106,6 @@ class HoyoWidgetProvider : AppWidgetProvider() {
 
     private fun baseViews(context: Context): RemoteViews {
         val views = RemoteViews(context.packageName, R.layout.hoyo_widget)
-        views.setTextViewText(R.id.widget_title, "HoYo FOMO")
         views.setOnClickPendingIntent(R.id.widget_root, refreshPendingIntent(context))
         return views
     }
@@ -119,6 +118,7 @@ class HoyoWidgetProvider : AppWidgetProvider() {
     ) {
         val views = baseViews(context)
         views.setTextViewText(R.id.widget_content, message)
+        views.setTextViewText(R.id.widget_badge, "…")
         views.setViewVisibility(R.id.widget_action_button, View.GONE)
 
         appWidgetManager.updateAppWidget(appWidgetId, views)
@@ -138,9 +138,11 @@ class HoyoWidgetProvider : AppWidgetProvider() {
                     AppPrefs.getWidgetLimit(context)
                 )
 
+                views.setTextViewText(R.id.widget_badge, root.getInt("total_actions").toString())
                 views.setTextViewText(R.id.widget_content, formatWidgetText(root))
                 applyTopAction(context, views, root)
             } catch (e: Exception) {
+                views.setTextViewText(R.id.widget_badge, "!")
                 views.setTextViewText(R.id.widget_content, "Failed to connect to Raspi ❌\n${e.message}")
                 views.setViewVisibility(R.id.widget_action_button, View.GONE)
             }
@@ -162,9 +164,16 @@ class HoyoWidgetProvider : AppWidgetProvider() {
         val method = action.getString("method")
         val body = if (action.has("body")) action.getJSONObject("body").toString() else null
 
+        val buttonBg = if (event.getString("category_tag") == "DAILY") {
+            R.drawable.widget_button_daily
+        } else {
+            R.drawable.widget_button_speedrun
+        }
+
+        views.setInt(R.id.widget_action_button, "setBackgroundResource", buttonBg)
         views.setTextViewText(
             R.id.widget_action_button,
-            "${action.getString("label")} — ${event.getString("event_name")}"
+            "${event.getString("emoji")} ${action.getString("label")} — ${event.getString("event_name")}"
         )
         views.setViewVisibility(R.id.widget_action_button, View.VISIBLE)
         views.setOnClickPendingIntent(
@@ -191,21 +200,15 @@ class HoyoWidgetProvider : AppWidgetProvider() {
             val events = game.getJSONArray("events")
 
             builder.appendLine()
-            builder.appendLine(gameTitle)
+            builder.append(gameTitle).append(": ")
 
+            val names = mutableListOf<String>()
             for (j in 0 until events.length()) {
                 val event = events.getJSONObject(j)
-                val emoji = event.getString("emoji")
-                val name = event.getString("event_name")
-                val daysLeft = if (event.isNull("days_left")) {
-                    "?"
-                } else {
-                    event.getInt("days_left").toString()
-                }
-
-                builder.appendLine("$emoji $name")
-                builder.appendLine("   ${daysLeft}d left")
+                val daysLeft = if (event.isNull("days_left")) "?" else event.getInt("days_left").toString()
+                names.add("${event.getString("emoji")} ${event.getString("event_name")} (${daysLeft}d)")
             }
+            builder.appendLine(names.joinToString(", "))
         }
 
         return builder.toString().trim()
