@@ -45,7 +45,10 @@ def parse_date(value):
         return None
 
     if len(value) == 10:
-        return date.fromisoformat(value)
+        try:
+            return date.fromisoformat(value)
+        except ValueError:
+            return None
 
     try:
         dt = datetime.fromisoformat(value)
