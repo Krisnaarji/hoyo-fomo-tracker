@@ -4,19 +4,38 @@ Requires fastapi/pydantic installed (see requirements.txt) - unlike
 tests/test_widget_logic.py, which covers the actual business logic
 (action rules, date math, counters) using only stdlib and runs
 anywhere. These tests only cover the thin route wiring: registration,
-limit parameter handling, and invalid-limit HTTPException handling.
+limit parameter handling, invalid-limit HTTPException handling, and
+EventCreate's date validator raising a Pydantic error.
+
+Skipped (not failed) when fastapi/pydantic aren't installed, so
+`python -m unittest discover` reports this gap honestly instead of as
+an import error.
 """
 import importlib
 import tempfile
 import unittest
 from pathlib import Path
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+try:
+    import fastapi  # noqa: F401
+    from pydantic import field_validator  # noqa: F401
+
+    ZoneInfo("Asia/Makassar")
+    BACKEND_RUNTIME_AVAILABLE = True
+except (ImportError, ZoneInfoNotFoundError):
+    BACKEND_RUNTIME_AVAILABLE = False
 
 from app import db as db_module
 
 
+@unittest.skipUnless(
+    BACKEND_RUNTIME_AVAILABLE,
+    "fastapi/pydantic and/or Asia/Makassar tzdata not available",
+)
 class WidgetTodayRouteTestCase(unittest.TestCase):
     def setUp(self):
-        self._tmp_dir = tempfile.TemporaryDirectory()
+        self._tmp_dir = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
         self._orig_db_path = db_module.DB_PATH
         db_module.DB_PATH = Path(self._tmp_dir.name) / "test_hoyo.db"
 
@@ -53,6 +72,17 @@ class WidgetTodayRouteTestCase(unittest.TestCase):
             main.widget_today(limit=0)
 
         self.assertEqual(ctx.exception.status_code, 400)
+
+    def test_event_create_rejects_malformed_date(self):
+        from pydantic import ValidationError
+
+        with self.assertRaises(ValidationError):
+            main.EventCreate(
+                game_title="Genshin",
+                event_name="Test",
+                start_date="not-a-date",
+                category_tag="HEAVY",
+            )
 
 
 if __name__ == "__main__":

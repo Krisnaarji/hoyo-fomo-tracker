@@ -3,9 +3,10 @@ from typing import Optional
 from zoneinfo import ZoneInfo
 
 from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from app.db import get_conn, init_db, row_to_dict
+from app.event_validation import is_valid_iso_date
 from app.widget_logic import build_widget_today_payload, today_local
 
 app = FastAPI(
@@ -30,6 +31,13 @@ class EventCreate(BaseModel):
     ai_summary: Optional[str] = None
     source_url: Optional[str] = None
     source_hash: Optional[str] = None
+
+    @field_validator("start_date", "end_date")
+    @classmethod
+    def validate_date_format(cls, value: Optional[str]) -> Optional[str]:
+        if not is_valid_iso_date(value):
+            raise ValueError("must be an exact YYYY-MM-DD date or omitted")
+        return value
 
 
 class ProgressUpdate(BaseModel):

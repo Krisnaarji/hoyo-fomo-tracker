@@ -2,6 +2,7 @@ import json
 from datetime import datetime, timezone
 
 from app.db import get_conn, row_to_dict
+from app.event_validation import is_valid_iso_date
 
 
 CATEGORY_MAP = {
@@ -109,6 +110,19 @@ def accept_ai_suggestion(suggestion_id: int):
 
         category_tag = CATEGORY_MAP[suggested_category]
 
+        cleaned_start = clean_date(suggestion["start_date"])
+        cleaned_end = clean_date(suggestion["end_date"])
+
+        if not is_valid_iso_date(cleaned_start) or not is_valid_iso_date(cleaned_end):
+            return {
+                "ok": False,
+                "message": (
+                    f"Suggestion {suggestion_id} has a malformed date "
+                    f"(start={cleaned_start!r}, end={cleaned_end!r}); "
+                    "left PENDING for manual review."
+                ),
+            }
+
         ai_summary_parts = []
 
         if suggestion.get("reason"):
@@ -145,8 +159,8 @@ def accept_ai_suggestion(suggestion_id: int):
             (
                 suggestion["game_title"],
                 suggestion["event_name"],
-                clean_date(suggestion["start_date"]),
-                clean_date(suggestion["end_date"]),
+                cleaned_start,
+                cleaned_end,
                 category_tag,
                 ai_summary,
                 suggestion["source_url"],
