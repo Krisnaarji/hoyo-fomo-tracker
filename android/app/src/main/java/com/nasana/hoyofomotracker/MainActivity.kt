@@ -1,50 +1,114 @@
 package com.nasana.hoyofomotracker
 
+import android.Manifest
+import android.content.Intent
+import android.os.Build
 import android.os.Bundle
+import android.view.Gravity
+import android.widget.Button
+import android.widget.EditText
+import android.widget.LinearLayout
+import android.widget.Switch
 import android.widget.TextView
+import android.widget.Toast
 import org.json.JSONObject
-import java.net.HttpURLConnection
-import java.net.URL
 import kotlin.concurrent.thread
 
 class MainActivity : android.app.Activity() {
-    private lateinit var textView: TextView
+    private lateinit var baseUrlInput: EditText
+    private lateinit var widgetLimitInput: EditText
+    private lateinit var notificationsSwitch: Switch
+    private lateinit var statusView: TextView
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        textView = TextView(this).apply {
-            text = "HoYo FOMO Tracker\nLoading today..."
-            textSize = 18f
-            setPadding(48, 48, 48, 48)
+        baseUrlInput = EditText(this).apply {
+            hint = "Base API URL"
+            setText(AppPrefs.getBaseUrl(this@MainActivity))
         }
 
-        setContentView(textView)
+        widgetLimitInput = EditText(this).apply {
+            hint = "Widget item limit"
+            setText(AppPrefs.getWidgetLimit(this@MainActivity).toString())
+        }
+
+        notificationsSwitch = Switch(this).apply {
+            text = "Enable reminder notifications"
+            isChecked = AppPrefs.getNotificationsEnabled(this@MainActivity)
+        }
+
+        val saveButton = Button(this).apply {
+            text = "Save settings"
+            setOnClickListener { saveSettings() }
+        }
+
+        statusView = TextView(this).apply {
+            text = "HoYo FOMO Tracker\nLoading today..."
+            textSize = 18f
+            setPadding(0, 48, 0, 0)
+        }
+
+        val root = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.TOP
+            setPadding(48, 48, 48, 48)
+            addView(baseUrlInput)
+            addView(widgetLimitInput)
+            addView(notificationsSwitch)
+            addView(saveButton)
+            addView(statusView)
+        }
+
+        setContentView(root)
 
         fetchWidgetToday()
     }
 
+    private fun saveSettings() {
+        val baseUrl = baseUrlInput.text.toString().trim().trimEnd('/')
+        val limit = widgetLimitInput.text.toString().toIntOrNull()
+
+        if (baseUrl.isEmpty() || limit == null || limit <= 0) {
+            Toast.makeText(this, "Enter a valid URL and limit", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        AppPrefs.setBaseUrl(this, baseUrl)
+        AppPrefs.setWidgetLimit(this, limit)
+        AppPrefs.setNotificationsEnabled(this, notificationsSwitch.isChecked)
+
+        if (notificationsSwitch.isChecked && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 1)
+        }
+
+        sendBroadcast(
+            Intent(this, HoyoWidgetProvider::class.java).apply {
+                action = HoyoWidgetProvider.ACTION_REFRESH
+            }
+        )
+
+        Toast.makeText(this, "Saved. Widget refreshing...", Toast.LENGTH_SHORT).show()
+        fetchWidgetToday()
+    }
+
     private fun fetchWidgetToday() {
+        val baseUrl = AppPrefs.getBaseUrl(this)
+        val limit = AppPrefs.getWidgetLimit(this)
+
         thread {
             try {
-                val url = URL("http://100.96.16.97:8123/widget/today?limit=8")
-                val connection = url.openConnection() as HttpURLConnection
-
-                connection.requestMethod = "GET"
-                connection.connectTimeout = 5000
-                connection.readTimeout = 5000
-
-                val responseText = connection.inputStream.bufferedReader().readText()
-                val formattedText = formatWidgetToday(responseText)
+                val root = HoyoApi.fetchWidgetToday(baseUrl, limit)
+                val formattedText = formatWidgetToday(root)
 
                 runOnUiThread {
-                    textView.text = formattedText
+                    statusView.text = formattedText
                 }
             } catch (e: Exception) {
                 runOnUiThread {
-                    textView.text = """
+                    statusView.text = """
                         HoYo FOMO Tracker ❌
-                        
+
                         API connection failed:
                         ${e.message}
                     """.trimIndent()
@@ -53,8 +117,7 @@ class MainActivity : android.app.Activity() {
         }
     }
 
-    private fun formatWidgetToday(jsonText: String): String {
-        val root = JSONObject(jsonText)
+    private fun formatWidgetToday(root: JSONObject): String {
         val today = root.getString("today")
         val totalActions = root.getInt("total_actions")
         val hiddenActions = root.getInt("hidden_actions")

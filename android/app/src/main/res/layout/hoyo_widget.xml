@@ -25,4 +25,13 @@
         android:textSize="13sp"
         android:paddingTop="8dp" />
 
+    <Button
+        android:id="@+id/widget_action_button"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:text="Check-in"
+        android:textAllCaps="false"
+        android:visibility="gone" />
+
 </LinearLayout>

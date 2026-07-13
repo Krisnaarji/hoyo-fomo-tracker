@@ -3,17 +3,21 @@ package com.nasana.hoyofomotracker
 import android.app.PendingIntent
 import android.appwidget.AppWidgetManager
 import android.appwidget.AppWidgetProvider
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.view.View
 import android.widget.RemoteViews
 import org.json.JSONObject
-import java.net.HttpURLConnection
-import java.net.URL
 import kotlin.concurrent.thread
 
 class HoyoWidgetProvider : AppWidgetProvider() {
     companion object {
-        private const val ACTION_REFRESH = "com.nasana.hoyofomotracker.ACTION_REFRESH"
+        const val ACTION_REFRESH = "com.nasana.hoyofomotracker.ACTION_REFRESH"
+        private const val ACTION_TOP_ACTION = "com.nasana.hoyofomotracker.ACTION_TOP_ACTION"
+        private const val EXTRA_ENDPOINT = "endpoint"
+        private const val EXTRA_METHOD = "method"
+        private const val EXTRA_BODY = "body"
     }
 
     override fun onUpdate(
@@ -22,7 +26,7 @@ class HoyoWidgetProvider : AppWidgetProvider() {
         appWidgetIds: IntArray
     ) {
         for (appWidgetId in appWidgetIds) {
-            updateLoading(context, appWidgetManager, appWidgetId)
+            updateStatus(context, appWidgetManager, appWidgetId, "Refreshing from Raspi...")
             fetchAndUpdateWidget(context, appWidgetManager, appWidgetId)
         }
     }
@@ -30,15 +34,38 @@ class HoyoWidgetProvider : AppWidgetProvider() {
     override fun onReceive(context: Context, intent: Intent) {
         super.onReceive(context, intent)
 
-        if (intent.action == ACTION_REFRESH) {
-            val appWidgetManager = AppWidgetManager.getInstance(context)
-            val appWidgetIds = appWidgetManager.getAppWidgetIds(
-                android.content.ComponentName(context, HoyoWidgetProvider::class.java)
-            )
+        val appWidgetManager = AppWidgetManager.getInstance(context)
+        val appWidgetIds = appWidgetManager.getAppWidgetIds(
+            ComponentName(context, HoyoWidgetProvider::class.java)
+        )
 
-            for (appWidgetId in appWidgetIds) {
-                updateLoading(context, appWidgetManager, appWidgetId)
-                fetchAndUpdateWidget(context, appWidgetManager, appWidgetId)
+        when (intent.action) {
+            ACTION_REFRESH -> {
+                for (appWidgetId in appWidgetIds) {
+                    updateStatus(context, appWidgetManager, appWidgetId, "Refreshing from Raspi...")
+                    fetchAndUpdateWidget(context, appWidgetManager, appWidgetId)
+                }
+            }
+
+            ACTION_TOP_ACTION -> {
+                val endpoint = intent.getStringExtra(EXTRA_ENDPOINT) ?: return
+                val method = intent.getStringExtra(EXTRA_METHOD) ?: return
+                val body = intent.getStringExtra(EXTRA_BODY)
+
+                for (appWidgetId in appWidgetIds) {
+                    updateStatus(context, appWidgetManager, appWidgetId, "Sending...")
+                }
+
+                thread {
+                    try {
+                        HoyoApi.runAction(AppPrefs.getBaseUrl(context), endpoint, method, body)
+                    } catch (_: Exception) {
+                    }
+
+                    for (appWidgetId in appWidgetIds) {
+                        fetchAndUpdateWidget(context, appWidgetManager, appWidgetId)
+                    }
+                }
             }
         }
     }
@@ -56,21 +83,43 @@ class HoyoWidgetProvider : AppWidgetProvider() {
         )
     }
 
+    private fun topActionPendingIntent(
+        context: Context,
+        endpoint: String,
+        method: String,
+        body: String?
+    ): PendingIntent {
+        val intent = Intent(context, HoyoWidgetProvider::class.java).apply {
+            action = ACTION_TOP_ACTION
+            putExtra(EXTRA_ENDPOINT, endpoint)
+            putExtra(EXTRA_METHOD, method)
+            putExtra(EXTRA_BODY, body)
+        }
+
+        return PendingIntent.getBroadcast(
+            context,
+            1,
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+    }
+
     private fun baseViews(context: Context): RemoteViews {
         val views = RemoteViews(context.packageName, R.layout.hoyo_widget)
+        views.setTextViewText(R.id.widget_title, "HoYo FOMO")
         views.setOnClickPendingIntent(R.id.widget_root, refreshPendingIntent(context))
         return views
     }
 
-    private fun updateLoading(
+    private fun updateStatus(
         context: Context,
         appWidgetManager: AppWidgetManager,
-        appWidgetId: Int
+        appWidgetId: Int,
+        message: String
     ) {
         val views = baseViews(context)
-
-        views.setTextViewText(R.id.widget_title, "HoYo FOMO")
-        views.setTextViewText(R.id.widget_content, "Refreshing from Raspi...")
+        views.setTextViewText(R.id.widget_content, message)
+        views.setViewVisibility(R.id.widget_action_button, View.GONE)
 
         appWidgetManager.updateAppWidget(appWidgetId, views)
     }
@@ -81,31 +130,50 @@ class HoyoWidgetProvider : AppWidgetProvider() {
         appWidgetId: Int
     ) {
         thread {
-            val content = try {
-                val url = URL("http://100.96.16.97:8123/widget/today?limit=5")
-                val connection = url.openConnection() as HttpURLConnection
-
-                connection.requestMethod = "GET"
-                connection.connectTimeout = 5000
-                connection.readTimeout = 5000
-
-                val responseText = connection.inputStream.bufferedReader().readText()
-                formatWidgetText(responseText)
-            } catch (e: Exception) {
-                "Failed to connect to Raspi ❌\n${e.message}"
-            }
-
             val views = baseViews(context)
 
-            views.setTextViewText(R.id.widget_title, "HoYo FOMO")
-            views.setTextViewText(R.id.widget_content, content)
+            try {
+                val root = HoyoApi.fetchWidgetToday(
+                    AppPrefs.getBaseUrl(context),
+                    AppPrefs.getWidgetLimit(context)
+                )
+
+                views.setTextViewText(R.id.widget_content, formatWidgetText(root))
+                applyTopAction(context, views, root)
+            } catch (e: Exception) {
+                views.setTextViewText(R.id.widget_content, "Failed to connect to Raspi ❌\n${e.message}")
+                views.setViewVisibility(R.id.widget_action_button, View.GONE)
+            }
 
             appWidgetManager.updateAppWidget(appWidgetId, views)
         }
     }
 
-    private fun formatWidgetText(jsonText: String): String {
-        val root = JSONObject(jsonText)
+    private fun applyTopAction(context: Context, views: RemoteViews, root: JSONObject) {
+        val top = HoyoApi.findTopSingleTapEvent(root)
+
+        if (top == null) {
+            views.setViewVisibility(R.id.widget_action_button, View.GONE)
+            return
+        }
+
+        val (event, action) = top
+        val endpoint = action.getString("endpoint")
+        val method = action.getString("method")
+        val body = if (action.has("body")) action.getJSONObject("body").toString() else null
+
+        views.setTextViewText(
+            R.id.widget_action_button,
+            "${action.getString("label")} — ${event.getString("event_name")}"
+        )
+        views.setViewVisibility(R.id.widget_action_button, View.VISIBLE)
+        views.setOnClickPendingIntent(
+            R.id.widget_action_button,
+            topActionPendingIntent(context, endpoint, method, body)
+        )
+    }
+
+    private fun formatWidgetText(root: JSONObject): String {
         val totalActions = root.getInt("total_actions")
         val hiddenActions = root.getInt("hidden_actions")
         val games = root.getJSONArray("games")
