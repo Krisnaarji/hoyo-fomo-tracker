@@ -63,4 +63,30 @@ class AppPrefsTest {
         AppPrefs.setNotificationsEnabled(context, false)
         assertEquals(false, AppPrefs.getNotificationsEnabled(context))
     }
+
+    @Test
+    fun getSetupConfirmed_falseOnFreshInstall() {
+        assertEquals(false, AppPrefs.getSetupConfirmed(context))
+    }
+
+    @Test
+    fun setSetupConfirmed_persistsAndRoundTrips() {
+        AppPrefs.setSetupConfirmed(context, true)
+        assertEquals(true, AppPrefs.getSetupConfirmed(context))
+    }
+
+    @Test
+    fun getSetupConfirmed_trueForLegacyInstallWithSavedBaseUrl() {
+        // Simulates an install from before setup_confirmed existed: only
+        // base_url was ever explicitly saved, setup_confirmed was never set.
+        AppPrefs.setBaseUrl(context, "http://10.0.2.2:8199")
+        assertEquals(true, AppPrefs.getSetupConfirmed(context))
+    }
+
+    @Test
+    fun getSetupConfirmed_explicitFalseOverridesLegacyBaseUrlDetection() {
+        AppPrefs.setBaseUrl(context, "http://10.0.2.2:8199")
+        AppPrefs.setSetupConfirmed(context, false)
+        assertEquals(false, AppPrefs.getSetupConfirmed(context))
+    }
 }

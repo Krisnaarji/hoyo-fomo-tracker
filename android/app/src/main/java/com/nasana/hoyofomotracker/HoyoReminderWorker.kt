@@ -96,6 +96,10 @@ class HoyoReminderWorker(context: Context, params: WorkerParameters) : Worker(co
     }
 
     override fun doWork(): Result {
+        if (!AppPrefs.getSetupConfirmed(applicationContext)) {
+            return Result.success()
+        }
+
         if (!AppPrefs.getNotificationsEnabled(applicationContext)) {
             return Result.success()
         }

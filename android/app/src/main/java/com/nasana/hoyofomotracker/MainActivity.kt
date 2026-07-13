@@ -77,6 +77,8 @@ class MainActivity : android.app.Activity() {
         AppPrefs.setBaseUrl(this, baseUrl)
         AppPrefs.setWidgetLimit(this, limit)
         AppPrefs.setNotificationsEnabled(this, notificationsSwitch.isChecked)
+        AppPrefs.setSetupConfirmed(this, true)
+        HoyoApplication.scheduleReminderWork(this)
 
         if (notificationsSwitch.isChecked && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 1)
