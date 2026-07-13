@@ -79,7 +79,7 @@ object HoyoApi {
                 if (!action.has("body_options")) continue
 
                 val daysLeft = if (event.isNull("days_left")) Int.MAX_VALUE else event.getInt("days_left")
-                if (daysLeft < bestDaysLeft) {
+                if (best == null || daysLeft < bestDaysLeft) {
                     bestDaysLeft = daysLeft
                     best = event to action
                 }
