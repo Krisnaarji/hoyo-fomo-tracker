@@ -69,14 +69,18 @@ def keep_current_and_upcoming_only(source_text: str) -> str:
 
     upcoming_index = trimmed.find("Upcoming Event Duration Type(s)")
 
+    # Search for end markers starting at the upcoming section (if any),
+    # not from the beginning - otherwise a marker that happens to also
+    # appear earlier (e.g. a stray "Navigation" reference inside the
+    # current-events section) would be found first via a bare find() and
+    # skipped entirely, silently missing its later, valid occurrence.
+    search_from = upcoming_index if upcoming_index != -1 else 0
+
     best_end_index = None
     for marker in end_markers:
-        index = trimmed.find(marker)
+        index = trimmed.find(marker, search_from)
 
         if index == -1:
-            continue
-
-        if upcoming_index != -1 and index < upcoming_index:
             continue
 
         if best_end_index is None or index < best_end_index:
