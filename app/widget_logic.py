@@ -72,25 +72,31 @@ def build_widget_action(event: dict, today: date, tz) -> Optional[dict]:
         return {
             "endpoint": f"/events/{event_id}/progress",
             "method": "PATCH",
-            "body_options": [25, 50, 75, 100],
+            "label": "Update progress",
+            "body_options": [
+                {"progress_status": 25},
+                {"progress_status": 50},
+                {"progress_status": 75},
+                {"progress_status": 100},
+            ],
         }
 
     return None
 
 
-def build_widget_event(event: dict, today: date, tz) -> dict:
-    result = {
+def build_widget_event(event: dict, today: date, tz, action: dict) -> dict:
+    return {
+        "id": event["id"],
+        "game_title": event["game_title"],
         "event_name": event["event_name"],
-        "emoji": CATEGORY_EMOJI.get(event["category_tag"], "📌"),
         "category_tag": event["category_tag"],
+        "emoji": CATEGORY_EMOJI.get(event["category_tag"], "📌"),
+        "progress_status": event["progress_status"],
+        "start_date": event["start_date"],
+        "end_date": event["end_date"],
         "days_left": days_left_for(event, today, tz),
+        "action": action,
     }
-
-    action = build_widget_action(event, today, tz)
-    if action is not None:
-        result["action"] = action
-
-    return result
 
 
 def fetch_widget_active_events(conn, today_iso: str) -> list:
@@ -126,23 +132,32 @@ def build_widget_today_payload(conn, limit: int, today: date, tz) -> dict:
     today_iso = today.isoformat()
     events = fetch_widget_active_events(conn, today_iso)
 
-    actions = [build_widget_action(event, today, tz) for event in events]
-    total_actions = sum(1 for action in actions if action is not None)
+    # Only actionable events are ever included - once an event is checked
+    # in / completed / muted, it drops out of the response entirely rather
+    # than lingering with no action, so it can never occupy a capped slot
+    # that a still-actionable event could otherwise use.
+    actionable = []
+    for event in events:
+        action = build_widget_action(event, today, tz)
+        if action is not None:
+            actionable.append((event, action))
 
-    capped_events = events[:limit]
-    capped_actionable = sum(1 for action in actions[:limit] if action is not None)
-    hidden_actions = total_actions - capped_actionable
+    total_actions = len(actionable)
+    shown = actionable[:limit]
+    hidden_actions = max(total_actions - len(shown), 0)
 
     games: dict = {}
-    for event in capped_events:
+    for event, action in shown:
         games.setdefault(event["game_title"], []).append(
-            build_widget_event(event, today, tz)
+            build_widget_event(event, today, tz, action)
         )
 
     return {
         "today": today_iso,
         "total_actions": total_actions,
+        "shown_actions": len(shown),
         "hidden_actions": hidden_actions,
+        "limit": limit,
         "games": [
             {"game_title": title, "events": events}
             for title, events in games.items()

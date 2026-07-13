@@ -259,6 +259,30 @@ def mark_daily_checkin(event_id: int):
     }
 
 
+# Convenience aliases already deployed on the Pi (kept for compatibility -
+# not currently called by the Android client, which uses the /events/...
+# endpoints named directly in each widget action's "endpoint" field).
+@app.post("/widget/events/{event_id}/checkin")
+def widget_checkin_event(event_id: int):
+    return mark_daily_checkin(event_id)
+
+
+@app.post("/widget/events/{event_id}/done")
+def widget_done_event(event_id: int):
+    return update_progress(event_id, ProgressUpdate(progress_status=100))
+
+
+@app.post("/widget/events/{event_id}/progress/{progress_status}")
+def widget_progress_event(event_id: int, progress_status: int):
+    if progress_status not in {25, 50, 75, 100}:
+        raise HTTPException(
+            status_code=400,
+            detail="progress_status must be 25, 50, 75, or 100",
+        )
+
+    return update_progress(event_id, ProgressUpdate(progress_status=progress_status))
+
+
 @app.post("/events/{event_id}/mute")
 def mute_event(event_id: int):
     timestamp = now_iso()

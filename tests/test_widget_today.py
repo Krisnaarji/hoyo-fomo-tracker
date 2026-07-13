@@ -14,6 +14,8 @@ an import error.
 import importlib
 import tempfile
 import unittest
+from contextlib import closing
+from datetime import datetime, timezone as dt_timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -61,9 +63,75 @@ class WidgetTodayRouteTestCase(unittest.TestCase):
         result = main.widget_today(limit=5)
 
         self.assertEqual(result["total_actions"], 0)
+        self.assertEqual(result["shown_actions"], 0)
         self.assertEqual(result["hidden_actions"], 0)
+        self.assertEqual(result["limit"], 5)
         self.assertEqual(result["games"], [])
         self.assertIn("today", result)
+
+    def _insert_event(self, game_title, event_name, category_tag, progress_status=0):
+        timestamp = datetime.now(dt_timezone.utc).isoformat()
+        with closing(db_module.get_conn()) as conn:
+            cursor = conn.execute(
+                """
+                INSERT INTO events (
+                    game_title, event_name, start_date, end_date, category_tag,
+                    progress_status, last_daily_checkin, is_muted,
+                    ai_summary, source_url, source_hash, created_at, updated_at
+                )
+                VALUES (?, ?, NULL, NULL, ?, ?, NULL, 0, NULL, NULL, NULL, ?, ?)
+                """,
+                (game_title, event_name, category_tag, progress_status, timestamp, timestamp),
+            )
+            conn.commit()
+            return cursor.lastrowid
+
+    def test_widget_compatibility_routes_are_registered_as_post(self):
+        expected_paths = {
+            "/widget/events/{event_id}/checkin",
+            "/widget/events/{event_id}/done",
+            "/widget/events/{event_id}/progress/{progress_status}",
+        }
+        registered = {
+            route.path
+            for route in main.app.routes
+            if getattr(route, "path", None) in expected_paths
+            and "POST" in getattr(route, "methods", set())
+        }
+        self.assertEqual(registered, expected_paths)
+
+    def test_widget_checkin_route_marks_daily_checkin(self):
+        event_id = self._insert_event("Genshin", "Daily Login", "DAILY")
+
+        result = main.widget_checkin_event(event_id)
+
+        self.assertEqual(result["id"], event_id)
+        self.assertIn("last_daily_checkin", result)
+
+    def test_widget_done_route_sets_progress_to_100(self):
+        event_id = self._insert_event("HSR", "Speedrun Boss", "SPEEDRUN")
+
+        result = main.widget_done_event(event_id)
+
+        self.assertEqual(result["progress_status"], 100)
+        self.assertEqual(result["is_muted"], 1)
+
+    def test_widget_progress_route_accepts_valid_value(self):
+        event_id = self._insert_event("ZZZ", "Lore Event", "HEAVY")
+
+        result = main.widget_progress_event(event_id, 50)
+
+        self.assertEqual(result["progress_status"], 50)
+
+    def test_widget_progress_route_rejects_invalid_value(self):
+        from fastapi import HTTPException
+
+        event_id = self._insert_event("ZZZ", "Lore Event", "HEAVY")
+
+        with self.assertRaises(HTTPException) as ctx:
+            main.widget_progress_event(event_id, 33)
+
+        self.assertEqual(ctx.exception.status_code, 400)
 
     def test_limit_below_one_returns_400(self):
         from fastapi import HTTPException

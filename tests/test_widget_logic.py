@@ -103,9 +103,12 @@ class WidgetLogicTestCase(unittest.TestCase):
 
         result = self._payload()
 
-        event_json = result["games"][0]["events"][0]
-        self.assertNotIn("action", event_json)
+        # Non-actionable events are omitted entirely, not just their
+        # "action" key - a checked-in DAILY disappears from the widget
+        # until it resets, matching the Pi's deployed behavior.
+        self.assertEqual(result["games"], [])
         self.assertEqual(result["total_actions"], 0)
+        self.assertEqual(result["shown_actions"], 0)
 
     def test_daily_checkin_timezone_boundary_converts_utc_to_local_date(self):
         # 2026-07-13 20:00 UTC is 2026-07-14 04:00 in UTC+8 (FIXED_TZ) - i.e.
@@ -119,8 +122,7 @@ class WidgetLogicTestCase(unittest.TestCase):
 
         result = self._payload()
 
-        event_json = result["games"][0]["events"][0]
-        self.assertNotIn("action", event_json)
+        self.assertEqual(result["games"], [])
         self.assertEqual(result["total_actions"], 0)
 
     def test_speedrun_action_shape(self):
@@ -138,8 +140,16 @@ class WidgetLogicTestCase(unittest.TestCase):
         result = self._payload()
 
         action = result["games"][0]["events"][0]["action"]
-        self.assertEqual(action["body_options"], [25, 50, 75, 100])
-        self.assertNotIn("label", action)
+        self.assertEqual(action["label"], "Update progress")
+        self.assertEqual(
+            action["body_options"],
+            [
+                {"progress_status": 25},
+                {"progress_status": 50},
+                {"progress_status": 75},
+                {"progress_status": 100},
+            ],
+        )
 
     def test_muted_event_excluded_entirely(self):
         self._insert_event("Genshin", "Old Event", "SPEEDRUN", is_muted=1)
@@ -156,8 +166,7 @@ class WidgetLogicTestCase(unittest.TestCase):
 
         result = self._payload()
 
-        event_json = result["games"][0]["events"][0]
-        self.assertNotIn("action", event_json)
+        self.assertEqual(result["games"], [])
         self.assertEqual(result["total_actions"], 0)
 
     def test_days_left_computed_from_end_date(self):
@@ -184,9 +193,29 @@ class WidgetLogicTestCase(unittest.TestCase):
         total_events = sum(len(g["events"]) for g in result["games"])
         self.assertEqual(total_events, 2)
         self.assertEqual(result["total_actions"], 3)
+        self.assertEqual(result["shown_actions"], 2)
         self.assertEqual(result["hidden_actions"], 1)
+        self.assertEqual(result["limit"], 2)
 
-    def test_hidden_actions_counts_omitted_actionable_event_in_capped_slot(self):
+    def test_event_includes_id_progress_and_date_fields(self):
+        event_id = self._insert_event(
+            "Genshin", "Full Shape Event", "SPEEDRUN",
+            end_date="2026-07-20", progress_status=0,
+        )
+
+        result = self._payload()
+        event_json = result["games"][0]["events"][0]
+
+        self.assertEqual(event_json["id"], event_id)
+        self.assertEqual(event_json["game_title"], "Genshin")
+        self.assertEqual(event_json["progress_status"], 0)
+        self.assertIsNone(event_json["start_date"])
+        self.assertEqual(event_json["end_date"], "2026-07-20")
+
+    def test_non_actionable_event_never_occupies_a_capped_slot(self):
+        # Since non-actionable events are filtered out before capping, a
+        # checked-in DAILY can no longer "use up" a limited slot while an
+        # actual actionable event gets hidden instead.
         self._insert_event(
             "Genshin", "Already Checked In", "DAILY",
             last_daily_checkin=FIXED_TODAY.isoformat(),
@@ -197,8 +226,10 @@ class WidgetLogicTestCase(unittest.TestCase):
 
         total_events = sum(len(g["events"]) for g in result["games"])
         self.assertEqual(total_events, 1)
+        self.assertEqual(result["games"][0]["events"][0]["event_name"], "Speedrun Overflow")
         self.assertEqual(result["total_actions"], 1)
-        self.assertEqual(result["hidden_actions"], 1)
+        self.assertEqual(result["shown_actions"], 1)
+        self.assertEqual(result["hidden_actions"], 0)
 
     def test_emoji_values_match_category(self):
         self._insert_event("Genshin", "Daily", "DAILY")
