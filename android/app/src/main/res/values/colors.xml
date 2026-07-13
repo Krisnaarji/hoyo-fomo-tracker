@@ -17,4 +17,6 @@
     <color name="widget_accent_daily_end">#F6A700</color>
     <color name="widget_accent_speedrun_start">#5CC8FF</color>
     <color name="widget_accent_speedrun_end">#0EA5E9</color>
+    <color name="widget_accent_heavy_start">#FF8A65</color>
+    <color name="widget_accent_heavy_end">#F4511E</color>
 </resources>

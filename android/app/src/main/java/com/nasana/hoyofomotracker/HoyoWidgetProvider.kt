@@ -85,6 +85,7 @@ class HoyoWidgetProvider : AppWidgetProvider() {
 
     private fun topActionPendingIntent(
         context: Context,
+        requestCode: Int,
         endpoint: String,
         method: String,
         body: String?
@@ -98,7 +99,7 @@ class HoyoWidgetProvider : AppWidgetProvider() {
 
         return PendingIntent.getBroadcast(
             context,
-            1,
+            requestCode,
             intent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
@@ -120,6 +121,7 @@ class HoyoWidgetProvider : AppWidgetProvider() {
         views.setTextViewText(R.id.widget_content, message)
         views.setTextViewText(R.id.widget_badge, "…")
         views.setViewVisibility(R.id.widget_action_button, View.GONE)
+        views.setViewVisibility(R.id.widget_progress_group, View.GONE)
 
         appWidgetManager.updateAppWidget(appWidgetId, views)
     }
@@ -145,6 +147,7 @@ class HoyoWidgetProvider : AppWidgetProvider() {
                 views.setTextViewText(R.id.widget_badge, "!")
                 views.setTextViewText(R.id.widget_content, "Failed to connect to Raspi ❌\n${e.message}")
                 views.setViewVisibility(R.id.widget_action_button, View.GONE)
+                views.setViewVisibility(R.id.widget_progress_group, View.GONE)
             }
 
             appWidgetManager.updateAppWidget(appWidgetId, views)
@@ -154,32 +157,69 @@ class HoyoWidgetProvider : AppWidgetProvider() {
     private fun applyTopAction(context: Context, views: RemoteViews, root: JSONObject) {
         val top = HoyoApi.findTopSingleTapEvent(root)
 
+        if (top != null) {
+            val (event, action) = top
+            val endpoint = action.getString("endpoint")
+            val method = action.getString("method")
+            val body = if (action.has("body")) action.getJSONObject("body").toString() else null
+
+            val buttonBg = if (event.getString("category_tag") == "DAILY") {
+                R.drawable.widget_button_daily
+            } else {
+                R.drawable.widget_button_speedrun
+            }
+
+            views.setInt(R.id.widget_action_button, "setBackgroundResource", buttonBg)
+            views.setTextViewText(
+                R.id.widget_action_button,
+                "${event.getString("emoji")} ${action.getString("label")} — ${event.getString("event_name")}"
+            )
+            views.setViewVisibility(R.id.widget_action_button, View.VISIBLE)
+            views.setOnClickPendingIntent(
+                R.id.widget_action_button,
+                topActionPendingIntent(context, 1, endpoint, method, body)
+            )
+            views.setViewVisibility(R.id.widget_progress_group, View.GONE)
+            return
+        }
+
+        views.setViewVisibility(R.id.widget_action_button, View.GONE)
+        applyTopHeavyAction(context, views, root)
+    }
+
+    private fun applyTopHeavyAction(context: Context, views: RemoteViews, root: JSONObject) {
+        val top = HoyoApi.findTopHeavyEvent(root)
+
         if (top == null) {
-            views.setViewVisibility(R.id.widget_action_button, View.GONE)
+            views.setViewVisibility(R.id.widget_progress_group, View.GONE)
             return
         }
 
         val (event, action) = top
         val endpoint = action.getString("endpoint")
         val method = action.getString("method")
-        val body = if (action.has("body")) action.getJSONObject("body").toString() else null
 
-        val buttonBg = if (event.getString("category_tag") == "DAILY") {
-            R.drawable.widget_button_daily
-        } else {
-            R.drawable.widget_button_speedrun
+        views.setTextViewText(
+            R.id.widget_progress_label,
+            "${event.getString("emoji")} ${event.getString("event_name")}"
+        )
+
+        val progressButtons = listOf(
+            R.id.widget_progress_25 to 25,
+            R.id.widget_progress_50 to 50,
+            R.id.widget_progress_75 to 75,
+            R.id.widget_progress_100 to 100
+        )
+
+        for ((viewId, value) in progressButtons) {
+            val body = JSONObject().put("progress_status", value).toString()
+            views.setOnClickPendingIntent(
+                viewId,
+                topActionPendingIntent(context, 20 + value, endpoint, method, body)
+            )
         }
 
-        views.setInt(R.id.widget_action_button, "setBackgroundResource", buttonBg)
-        views.setTextViewText(
-            R.id.widget_action_button,
-            "${event.getString("emoji")} ${action.getString("label")} — ${event.getString("event_name")}"
-        )
-        views.setViewVisibility(R.id.widget_action_button, View.VISIBLE)
-        views.setOnClickPendingIntent(
-            R.id.widget_action_button,
-            topActionPendingIntent(context, endpoint, method, body)
-        )
+        views.setViewVisibility(R.id.widget_progress_group, View.VISIBLE)
     }
 
     private fun formatWidgetText(root: JSONObject): String {

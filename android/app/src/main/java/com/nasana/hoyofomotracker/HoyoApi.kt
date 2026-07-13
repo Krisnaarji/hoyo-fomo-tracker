@@ -29,8 +29,8 @@ object HoyoApi {
         httpRequest("$baseUrl$endpoint", method, body)
     }
 
-    // HEAVY actions expose body_options (25/50/75/100) and need their own picker later,
-    // so only DAILY/SPEEDRUN actions (single tap, no choice) are eligible here.
+    // HEAVY actions expose body_options (25/50/75/100) instead of a single tap,
+    // so they're excluded here and handled separately by findTopHeavyEvent.
     fun findTopSingleTapEvent(root: JSONObject): Pair<JSONObject, JSONObject>? {
         val games = root.getJSONArray("games")
         var best: Pair<JSONObject, JSONObject>? = null
@@ -55,6 +55,31 @@ object HoyoApi {
 
                 if (rank < bestRank || (rank == bestRank && daysLeft < bestDaysLeft)) {
                     bestRank = rank
+                    bestDaysLeft = daysLeft
+                    best = event to action
+                }
+            }
+        }
+
+        return best
+    }
+
+    fun findTopHeavyEvent(root: JSONObject): Pair<JSONObject, JSONObject>? {
+        val games = root.getJSONArray("games")
+        var best: Pair<JSONObject, JSONObject>? = null
+        var bestDaysLeft = Int.MAX_VALUE
+
+        for (i in 0 until games.length()) {
+            val events = games.getJSONObject(i).getJSONArray("events")
+
+            for (j in 0 until events.length()) {
+                val event = events.getJSONObject(j)
+                val action = event.optJSONObject("action") ?: continue
+
+                if (!action.has("body_options")) continue
+
+                val daysLeft = if (event.isNull("days_left")) Int.MAX_VALUE else event.getInt("days_left")
+                if (daysLeft < bestDaysLeft) {
                     bestDaysLeft = daysLeft
                     best = event to action
                 }
