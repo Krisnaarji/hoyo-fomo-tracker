@@ -1,20 +1,25 @@
-"""Tests for the pure grouping logic in app.discord_bot.
+"""Tests for the pure grouping logic and persistent buttons in app.discord_bot.
 
-Requires discord.py installed (see requirements.txt). Skipped (not
-failed) when it isn't, so `python -m unittest discover` reports this
-gap honestly instead of as an import error.
+Requires discord.py installed (see requirements.txt), and app.discord_bot
+itself sets up a ZoneInfo("Asia/Makassar") at import time, so these tests
+are skipped (not failed) when either dependency is unavailable, same as
+tests/test_widget_today.py and tests/test_reminder_check.py.
 """
+import asyncio
 import unittest
+from zoneinfo import ZoneInfoNotFoundError
 
 try:
-    import discord  # noqa: F401
+    from app.discord_bot import (
+        DISCORD_SELECT_MAX_OPTIONS,
+        SuggestionActionButton,
+        SuggestionActionView,
+        group_events_by_game,
+    )
 
-    DISCORD_AVAILABLE = True
-except ImportError:
-    DISCORD_AVAILABLE = False
-
-if DISCORD_AVAILABLE:
-    from app.discord_bot import DISCORD_SELECT_MAX_OPTIONS, group_events_by_game
+    RUNTIME_AVAILABLE = True
+except (ImportError, ZoneInfoNotFoundError):
+    RUNTIME_AVAILABLE = False
 
 
 def make_event(id, game_title, category_tag, end_date, event_name="Event"):
@@ -27,7 +32,7 @@ def make_event(id, game_title, category_tag, end_date, event_name="Event"):
     }
 
 
-@unittest.skipUnless(DISCORD_AVAILABLE, "discord.py not available")
+@unittest.skipUnless(RUNTIME_AVAILABLE, "discord.py and/or Asia/Makassar tzdata not available")
 class GroupEventsByGameTestCase(unittest.TestCase):
     def test_groups_by_game_title(self):
         events = [
@@ -105,6 +110,74 @@ class GroupEventsByGameTestCase(unittest.TestCase):
         grouped = group_events_by_game(events)
 
         self.assertEqual(list(grouped.keys()), ["Genshin", "HSR", "ZZZ"])
+
+
+@unittest.skipUnless(RUNTIME_AVAILABLE, "discord.py and/or Asia/Makassar tzdata not available")
+class SuggestionActionButtonTestCase(unittest.TestCase):
+    def test_view_is_persistent(self):
+        view = SuggestionActionView({"id": 42, "suggested_category": "heavy"})
+        self.assertTrue(view.is_persistent())
+
+    def test_info_suggestions_omit_accept_button(self):
+        view = SuggestionActionView({"id": 7, "suggested_category": "info"})
+        actions = {child.action for child in view.children}
+        self.assertEqual(actions, {"reject"})
+
+    def test_non_info_suggestions_get_both_buttons(self):
+        view = SuggestionActionView({"id": 7, "suggested_category": "daily"})
+        actions = {child.action for child in view.children}
+        self.assertEqual(actions, {"accept", "reject"})
+
+    def test_custom_id_encodes_suggestion_id_and_action(self):
+        button = SuggestionActionButton(99, "accept")
+        self.assertEqual(button.custom_id, "suggestion:accept:99")
+
+    def test_from_custom_id_reconstructs_button_after_restart(self):
+        match = SuggestionActionButton.__discord_ui_compiled_template__.match(
+            "suggestion:reject:123"
+        )
+
+        reconstructed = asyncio.run(
+            SuggestionActionButton.from_custom_id(None, None, match)
+        )
+
+        self.assertEqual(reconstructed.suggestion_id, 123)
+        self.assertEqual(reconstructed.action, "reject")
+        self.assertTrue(reconstructed.is_persistent())
+
+    def test_accept_callback_calls_accept_ai_suggestion(self):
+        from unittest.mock import AsyncMock, patch
+
+        button = SuggestionActionButton(5, "accept")
+        interaction = AsyncMock()
+
+        with patch(
+            "app.discord_bot.accept_ai_suggestion",
+            return_value={"message": "Accepted."},
+        ) as accept_mock:
+            asyncio.run(button.callback(interaction))
+
+        accept_mock.assert_called_once_with(5)
+        interaction.response.edit_message.assert_awaited_once_with(
+            content="Accepted.", view=None
+        )
+
+    def test_reject_callback_calls_reject_ai_suggestion(self):
+        from unittest.mock import AsyncMock, patch
+
+        button = SuggestionActionButton(5, "reject")
+        interaction = AsyncMock()
+
+        with patch(
+            "app.discord_bot.reject_ai_suggestion",
+            return_value={"message": "Rejected."},
+        ) as reject_mock:
+            asyncio.run(button.callback(interaction))
+
+        reject_mock.assert_called_once_with(5)
+        interaction.response.edit_message.assert_awaited_once_with(
+            content="Rejected.", view=None
+        )
 
 
 if __name__ == "__main__":

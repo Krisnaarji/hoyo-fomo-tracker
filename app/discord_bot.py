@@ -401,39 +401,60 @@ class HoyoSelectView(discord.ui.View):
             self.add_item(HoyoEventSelect(game_title, game_events))
 
 
+class SuggestionActionButton(
+    discord.ui.DynamicItem[discord.ui.Button],
+    template=r"suggestion:(?P<action>accept|reject):(?P<id>[0-9]+)",
+):
+    """A suggestion accept/reject button whose routing lives entirely in its
+    custom_id, so it keeps working after a bot restart - unlike a plain
+    Button with a bound instance callback, which only exists in memory for
+    the process that created it and breaks (or crashes add_view) once that
+    process is gone."""
+
+    def __init__(self, suggestion_id: int, action: str):
+        self.suggestion_id = suggestion_id
+        self.action = action
+
+        if action == "accept":
+            style = discord.ButtonStyle.success
+            label = "✅ Accept"
+        else:
+            style = discord.ButtonStyle.danger
+            label = "🗑️ Reject"
+
+        super().__init__(
+            discord.ui.Button(
+                label=label,
+                style=style,
+                custom_id=f"suggestion:{action}:{suggestion_id}",
+            )
+        )
+
+    @classmethod
+    async def from_custom_id(cls, interaction, item, match, /):
+        return cls(int(match["id"]), match["action"])
+
+    async def callback(self, interaction: discord.Interaction):
+        if self.action == "accept":
+            result = accept_ai_suggestion(self.suggestion_id)
+        else:
+            result = reject_ai_suggestion(self.suggestion_id)
+
+        await interaction.response.edit_message(
+            content=result["message"],
+            view=None,
+        )
+
+
 class SuggestionActionView(discord.ui.View):
     def __init__(self, suggestion: dict):
         super().__init__(timeout=None)
-        self.suggestion_id = int(suggestion["id"])
+        suggestion_id = int(suggestion["id"])
 
         if suggestion["suggested_category"] != "info":
-            accept_button = discord.ui.Button(
-                label="✅ Accept",
-                style=discord.ButtonStyle.success,
-            )
-            accept_button.callback = self.accept_callback
-            self.add_item(accept_button)
+            self.add_item(SuggestionActionButton(suggestion_id, "accept"))
 
-        reject_button = discord.ui.Button(
-            label="🗑️ Reject",
-            style=discord.ButtonStyle.danger,
-        )
-        reject_button.callback = self.reject_callback
-        self.add_item(reject_button)
-
-    async def accept_callback(self, interaction: discord.Interaction):
-        result = accept_ai_suggestion(self.suggestion_id)
-        await interaction.response.edit_message(
-            content=result["message"],
-            view=None,
-        )
-
-    async def reject_callback(self, interaction: discord.Interaction):
-        result = reject_ai_suggestion(self.suggestion_id)
-        await interaction.response.edit_message(
-            content=result["message"],
-            view=None,
-        )
+        self.add_item(SuggestionActionButton(suggestion_id, "reject"))
 
 
 class SuggestionSelect(discord.ui.Select):
@@ -496,6 +517,8 @@ class SuggestionSelectView(discord.ui.View):
 
 class HoyoBot(commands.Bot):
     async def setup_hook(self):
+        self.add_dynamic_items(SuggestionActionButton)
+
         guild_id = get_env("DISCORD_GUILD_ID")
 
         if guild_id:
