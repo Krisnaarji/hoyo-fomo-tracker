@@ -114,6 +114,52 @@ class AcceptAiSuggestionTestCase(unittest.TestCase):
 
         self.assertTrue(result["ok"])
 
+    def test_duplicate_of_existing_event_is_auto_rejected_not_left_pending(self):
+        # save_ai_event_suggestions now skips creating suggestions for
+        # events that already exist, but a suggestion saved before that
+        # check existed can still land here - it must not get stuck as
+        # PENDING forever (the bug that caused endless "Event already
+        # exists" spam every time it was re-accepted).
+        with closing(db_module.get_conn()) as conn:
+            conn.execute(
+                """
+                INSERT INTO events (
+                    game_title, event_name, start_date, end_date,
+                    category_tag, created_at, updated_at
+                )
+                VALUES ('Genshin', 'Test Event', '2026-07-04', '2026-07-20', 'HEAVY', 'ts', 'ts')
+                """
+            )
+            conn.commit()
+
+        suggestion_id = self._insert_suggestion(start_date="2026-07-04", end_date="2026-07-20")
+
+        result = review.accept_ai_suggestion(suggestion_id)
+
+        self.assertFalse(result["ok"])
+        self.assertEqual(self._count_events(), 1)
+        self.assertEqual(self._suggestion_status(suggestion_id), "REJECTED")
+
+    def test_duplicate_rejection_does_not_affect_other_pending_suggestions(self):
+        with closing(db_module.get_conn()) as conn:
+            conn.execute(
+                """
+                INSERT INTO events (
+                    game_title, event_name, start_date, end_date,
+                    category_tag, created_at, updated_at
+                )
+                VALUES ('Genshin', 'Test Event', '2026-07-04', '2026-07-20', 'HEAVY', 'ts', 'ts')
+                """
+            )
+            conn.commit()
+
+        duplicate_id = self._insert_suggestion(start_date="2026-07-04", end_date="2026-07-20")
+        other_id = self._insert_suggestion(start_date="2026-08-01", end_date="2026-08-20")
+
+        review.accept_ai_suggestion(duplicate_id)
+
+        self.assertEqual(self._suggestion_status(other_id), "PENDING")
+
 
 if __name__ == "__main__":
     unittest.main()

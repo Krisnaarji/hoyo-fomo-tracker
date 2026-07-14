@@ -29,6 +29,20 @@ class SaveAiEventSuggestionsTestCase(unittest.TestCase):
         with closing(db_module.get_conn()) as conn:
             return [dict(row) for row in conn.execute("SELECT * FROM ai_event_suggestions")]
 
+    def _insert_real_event(self, game_title, event_name, start_date=None, end_date=None):
+        with closing(db_module.get_conn()) as conn:
+            conn.execute(
+                """
+                INSERT INTO events (
+                    game_title, event_name, start_date, end_date,
+                    category_tag, created_at, updated_at
+                )
+                VALUES (?, ?, ?, ?, 'HEAVY', 'ts', 'ts')
+                """,
+                (game_title, event_name, start_date, end_date),
+            )
+            conn.commit()
+
     def test_valid_event_inserted_as_pending(self):
         result = ai_suggestions.save_ai_event_suggestions(
             game_title="Genshin",
@@ -178,6 +192,67 @@ class SaveAiEventSuggestionsTestCase(unittest.TestCase):
         # was already reviewed (accepted or rejected), not just PENDING ones.
         self.assertEqual(result, {"inserted": 0, "skipped": 1})
         self.assertEqual(len(self._fetch_all()), 1)
+
+    def test_matching_real_event_prevents_new_suggestion(self):
+        self._insert_real_event("Genshin", "Already Tracked", start_date="2026-07-04", end_date="2026-07-20")
+
+        result = ai_suggestions.save_ai_event_suggestions(
+            game_title="Genshin",
+            source_url="http://example.com",
+            source_hash="a-completely-different-hash",
+            ai_result={
+                "events": [
+                    {"title": "Already Tracked", "start_date": "2026-07-04", "end_date": "2026-07-20"}
+                ]
+            },
+        )
+
+        self.assertEqual(result, {"inserted": 0, "skipped": 1})
+        self.assertEqual(self._fetch_all(), [])
+
+    def test_matching_real_event_with_null_dates_prevents_new_suggestion(self):
+        self._insert_real_event("Genshin", "Dateless Tracked Event")
+
+        result = ai_suggestions.save_ai_event_suggestions(
+            game_title="Genshin",
+            source_url="http://example.com",
+            source_hash="another-hash",
+            ai_result={"events": [{"title": "Dateless Tracked Event"}]},
+        )
+
+        self.assertEqual(result, {"inserted": 0, "skipped": 1})
+
+    def test_real_event_with_different_dates_does_not_block_suggestion(self):
+        self._insert_real_event("Genshin", "Same Name", start_date="2026-07-04", end_date="2026-07-20")
+
+        result = ai_suggestions.save_ai_event_suggestions(
+            game_title="Genshin",
+            source_url="http://example.com",
+            source_hash="hash1",
+            ai_result={
+                "events": [
+                    {"title": "Same Name", "start_date": "2026-08-01", "end_date": "2026-08-20"}
+                ]
+            },
+        )
+
+        self.assertEqual(result, {"inserted": 1, "skipped": 0})
+
+    def test_real_event_in_different_game_does_not_block_suggestion(self):
+        self._insert_real_event("HSR", "Same Name", start_date="2026-07-04", end_date="2026-07-20")
+
+        result = ai_suggestions.save_ai_event_suggestions(
+            game_title="Genshin",
+            source_url="http://example.com",
+            source_hash="hash1",
+            ai_result={
+                "events": [
+                    {"title": "Same Name", "start_date": "2026-07-04", "end_date": "2026-07-20"}
+                ]
+            },
+        )
+
+        self.assertEqual(result, {"inserted": 1, "skipped": 0})
 
     def test_different_end_date_is_not_a_duplicate(self):
         ai_suggestions.save_ai_event_suggestions(

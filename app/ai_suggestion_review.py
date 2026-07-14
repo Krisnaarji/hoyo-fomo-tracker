@@ -171,9 +171,29 @@ def accept_ai_suggestion(suggestion_id: int):
         )
 
         if cursor.rowcount == 0:
+            # save_ai_event_suggestions now skips creating suggestions for
+            # events that already exist, but older suggestions saved before
+            # that check existed (or a race with another accept) can still
+            # land here. Auto-resolve rather than leaving it PENDING forever
+            # - a suggestion that can never succeed shouldn't keep coming
+            # back for review.
+            conn.execute(
+                """
+                UPDATE ai_event_suggestions
+                SET status = 'REJECTED',
+                    updated_at = ?
+                WHERE id = ?
+                """,
+                (timestamp, suggestion_id),
+            )
+            conn.commit()
+
             return {
                 "ok": False,
-                "message": "Event already exists. Suggestion left as PENDING.",
+                "message": (
+                    f"Suggestion {suggestion_id} matches an event that already exists; "
+                    "auto-rejected instead of leaving it stuck as pending."
+                ),
             }
 
         conn.execute(

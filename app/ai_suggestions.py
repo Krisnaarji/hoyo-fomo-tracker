@@ -55,6 +55,16 @@ def save_ai_event_suggestions(
             # same suggestion on every re-scrape. This does a NULL-safe
             # ("IS" instead of "=") existence check atomically in the same
             # statement, regardless of the suggestion's review status.
+            #
+            # The second NOT EXISTS guards against a different case: the
+            # source page's content hash changes for reasons that have
+            # nothing to do with the event list itself (wiki formatting
+            # edits, ad content, relative-date text), which makes the AI
+            # re-extract the *entire* current event list - including events
+            # already accepted from a previous scrape under a different
+            # source_hash. Without this check, those come back as "new"
+            # suggestions for an event that already exists, which can never
+            # be accepted (see accept_ai_suggestion's duplicate handling).
             cursor = conn.execute(
                 """
                 INSERT INTO ai_event_suggestions (
@@ -81,6 +91,13 @@ def save_ai_event_suggestions(
                       AND end_date IS ?
                       AND source_hash = ?
                 )
+                AND NOT EXISTS (
+                    SELECT 1 FROM events
+                    WHERE game_title = ?
+                      AND event_name = ?
+                      AND start_date IS ?
+                      AND end_date IS ?
+                )
                 """,
                 (
                     game_title,
@@ -100,6 +117,10 @@ def save_ai_event_suggestions(
                     start_date,
                     end_date,
                     source_hash,
+                    game_title,
+                    event_name,
+                    start_date,
+                    end_date,
                 ),
             )
 
