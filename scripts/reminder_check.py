@@ -169,18 +169,85 @@ def build_reminders(conn, event, today):
     return reminders
 
 
-def format_discord_message(reminder):
-    emoji = {
-        "DAILY": "⚠️",
-        "HEAVY": "🔥",
-        "SPEEDRUN": "⚡",
-    }.get(reminder["category_tag"], "📌")
+DIGEST_CATEGORY_EMOJI = {
+    "DAILY": "🎁",
+    "SPEEDRUN": "⚡",
+    "HEAVY": "🔥",
+}
+
+DIGEST_CATEGORY_PRIORITY = {
+    "DAILY": 0,
+    "SPEEDRUN": 1,
+    "HEAVY": 2,
+}
+
+DIGEST_HEADER = "# HoYo FOMO Reminder"
+DIGEST_CONTINUATION_HEADER = "# HoYo FOMO Reminder (cont.)"
+
+# Discord webhook `content` is capped at 2000 characters; stay comfortably
+# under that so a busy day's digest can never be silently rejected.
+DIGEST_MAX_LENGTH = 1900
+
+
+def _digest_entry_line(reminder):
+    category = reminder["category_tag"]
+    emoji = DIGEST_CATEGORY_EMOJI.get(category, "📌")
 
     return (
-        f"{emoji} **{reminder['game_title']} — {reminder['event_name']}**\n"
-        f"{reminder['message']}\n"
-        f"Event ID: `{reminder['event_id']}` | Type: `{reminder['reminder_type']}`"
+        f"- {emoji} **{category}** — {reminder['event_name']}\n"
+        f"  {reminder['message']} `#{reminder['event_id']}`"
     )
+
+
+def build_discord_digests(reminders, max_length=DIGEST_MAX_LENGTH):
+    """Formats reminders into one or more Discord messages, grouped by game
+    and kept under Discord's per-message content limit. Returns a list of
+    (message_text, reminders_in_message) pairs so the caller can mark only
+    the reminders that were actually sent if a chunk fails to send."""
+    grouped = {}
+    for reminder in reminders:
+        grouped.setdefault(reminder["game_title"], []).append(reminder)
+
+    digests = []
+    block_lines = [DIGEST_HEADER]
+    block_reminders = []
+
+    def flush():
+        nonlocal block_lines, block_reminders
+        digests.append(("\n".join(block_lines), block_reminders))
+        block_lines = [DIGEST_CONTINUATION_HEADER]
+        block_reminders = []
+
+    for game_title in sorted(grouped):
+        game_header = f"## {game_title}"
+        header_in_block = False
+
+        sorted_reminders = sorted(
+            grouped[game_title],
+            key=lambda reminder: (
+                DIGEST_CATEGORY_PRIORITY.get(reminder["category_tag"], 9),
+                reminder["event_name"].lower(),
+            ),
+        )
+
+        for reminder in sorted_reminders:
+            entry_lines = [] if header_in_block else [game_header]
+            entry_lines.append(_digest_entry_line(reminder))
+
+            projected = block_lines + entry_lines
+            if block_reminders and len("\n".join(projected)) > max_length:
+                flush()
+                header_in_block = False
+                entry_lines = [game_header, _digest_entry_line(reminder)]
+
+            block_lines.extend(entry_lines)
+            block_reminders.append(reminder)
+            header_in_block = True
+
+    if block_reminders:
+        flush()
+
+    return digests
 
 
 def print_reminders(today, active_count, reminders):
@@ -243,14 +310,14 @@ def main():
         if args.send_discord:
             failed = 0
 
-            for reminder in reminders:
+            for digest_text, digest_reminders in build_discord_digests(reminders):
                 try:
-                    send_discord_webhook(format_discord_message(reminder))
-                    sent_reminders.append(reminder)
-                    print(f"Sent Discord reminder: {reminder['reminder_type']}")
+                    send_discord_webhook(digest_text)
+                    sent_reminders.extend(digest_reminders)
+                    print(f"Sent Discord reminder digest: {len(digest_reminders)} reminder(s)")
                 except RuntimeError as exc:
-                    failed += 1
-                    print(f"Failed Discord reminder: {reminder['reminder_type']}")
+                    failed += len(digest_reminders)
+                    print(f"Failed Discord reminder digest: {len(digest_reminders)} reminder(s)")
                     print(f"Reason: {exc}")
 
             if failed:

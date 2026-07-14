@@ -24,6 +24,15 @@ CATEGORY_EMOJI = {
     "SPEEDRUN": "⚡",
 }
 
+HOYO_CATEGORY_PRIORITY = {
+    "DAILY": 0,
+    "SPEEDRUN": 1,
+    "HEAVY": 2,
+}
+
+# Discord's discord.ui.Select hard-caps options at 25 per component.
+DISCORD_SELECT_MAX_OPTIONS = 25
+
 SUGGESTION_EMOJI = {
     "daily": "🎁",
     "heavy": "🔥",
@@ -88,12 +97,35 @@ def fetch_active_events():
                 end_date IS NULL,
                 end_date ASC,
                 game_title ASC
-            LIMIT 25
             """,
             (today, today),
         ).fetchall()
 
     return [row_to_dict(row) for row in rows]
+
+
+def group_events_by_game(
+    events: list[dict], max_per_group: int = DISCORD_SELECT_MAX_OPTIONS
+) -> dict[str, list[dict]]:
+    """Groups events by game_title, sorted by category priority / soonest
+    end date / name. Each group is truncated to max_per_group, since Discord
+    rejects a Select with more than 25 options."""
+    grouped: dict[str, list[dict]] = {}
+
+    for event in events:
+        grouped.setdefault(event["game_title"], []).append(event)
+
+    def event_sort_key(event: dict):
+        return (
+            HOYO_CATEGORY_PRIORITY.get(event["category_tag"], 9),
+            event["end_date"] or "9999-12-31",
+            event["event_name"].lower(),
+        )
+
+    return {
+        game_title: sorted(grouped[game_title], key=event_sort_key)[:max_per_group]
+        for game_title in sorted(grouped)
+    }
 
 
 def get_event(event_id: int):
@@ -299,12 +331,12 @@ class EventActionView(discord.ui.View):
 
 
 class HoyoEventSelect(discord.ui.Select):
-    def __init__(self, events: list[dict]):
+    def __init__(self, game_title: str, events: list[dict]):
         options = []
 
         for event in events:
             emoji = CATEGORY_EMOJI.get(event["category_tag"], "📌")
-            label = f"{emoji} {event['game_title']}: {event['event_name']}"
+            label = f"{emoji} {event['event_name']}"
 
             if len(label) > 100:
                 label = label[:97] + "..."
@@ -327,7 +359,7 @@ class HoyoEventSelect(discord.ui.Select):
             )
 
         super().__init__(
-            placeholder="Choose an active HoYo event...",
+            placeholder=f"Choose {game_title} event...",
             min_values=1,
             max_values=1,
             options=options,
@@ -364,7 +396,9 @@ class HoyoEventSelect(discord.ui.Select):
 class HoyoSelectView(discord.ui.View):
     def __init__(self, events: list[dict]):
         super().__init__(timeout=180)
-        self.add_item(HoyoEventSelect(events))
+
+        for game_title, game_events in group_events_by_game(events).items():
+            self.add_item(HoyoEventSelect(game_title, game_events))
 
 
 class SuggestionActionView(discord.ui.View):
