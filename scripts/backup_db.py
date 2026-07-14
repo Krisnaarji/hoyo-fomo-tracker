@@ -7,6 +7,21 @@ from pathlib import Path
 BASE_DIR = Path(__file__).resolve().parent.parent
 DB_PATH = BASE_DIR / "hoyo.db"
 BACKUP_DIR = BASE_DIR / "backups"
+KEEP_BACKUPS = 14
+
+
+def cleanup_old_backups():
+    backups = sorted(
+        BACKUP_DIR.glob("hoyo-*.db"),
+        key=lambda path: path.stat().st_mtime,
+        reverse=True,
+    )
+
+    old_backups = backups[KEEP_BACKUPS:]
+
+    for backup in old_backups:
+        backup.unlink()
+        print(f"Removed old backup: {backup}")
 
 
 def create_backup(source_path: Path, destination_path: Path) -> None:
@@ -31,6 +46,8 @@ def main():
     create_backup(DB_PATH, backup_path)
 
     print(f"Backup created: {backup_path}")
+
+    cleanup_old_backups()
 
 
 if __name__ == "__main__":

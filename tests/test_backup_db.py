@@ -1,11 +1,14 @@
 """Pure stdlib tests (sqlite3 + tempfile only) for scripts.backup_db."""
+import os
 import sqlite3
 import tempfile
+import time
 import unittest
 from contextlib import closing
 from pathlib import Path
+from unittest.mock import patch
 
-from scripts.backup_db import create_backup
+from scripts.backup_db import cleanup_old_backups, create_backup
 
 
 class CreateBackupTestCase(unittest.TestCase):
@@ -64,6 +67,58 @@ class CreateBackupTestCase(unittest.TestCase):
         finally:
             writer_conn.rollback()
             writer_conn.close()
+
+
+class CleanupOldBackupsTestCase(unittest.TestCase):
+    def setUp(self):
+        self._tmp_dir = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
+        self.backup_dir = Path(self._tmp_dir.name)
+
+    def tearDown(self):
+        self._tmp_dir.cleanup()
+
+    def _make_backup(self, name, age_seconds):
+        path = self.backup_dir / name
+        path.write_text("fake db contents")
+        mtime = time.time() - age_seconds
+        os.utime(path, (mtime, mtime))
+        return path
+
+    def test_keeps_most_recent_and_removes_the_rest(self):
+        oldest = self._make_backup("hoyo-20260101-000000.db", age_seconds=300)
+        older = self._make_backup("hoyo-20260102-000000.db", age_seconds=200)
+        newer = self._make_backup("hoyo-20260103-000000.db", age_seconds=100)
+        newest = self._make_backup("hoyo-20260104-000000.db", age_seconds=0)
+
+        with patch("scripts.backup_db.BACKUP_DIR", self.backup_dir):
+            with patch("scripts.backup_db.KEEP_BACKUPS", 2):
+                cleanup_old_backups()
+
+        self.assertFalse(oldest.exists())
+        self.assertFalse(older.exists())
+        self.assertTrue(newer.exists())
+        self.assertTrue(newest.exists())
+
+    def test_does_nothing_when_backup_count_is_within_limit(self):
+        only_backup = self._make_backup("hoyo-20260101-000000.db", age_seconds=0)
+
+        with patch("scripts.backup_db.BACKUP_DIR", self.backup_dir):
+            with patch("scripts.backup_db.KEEP_BACKUPS", 14):
+                cleanup_old_backups()
+
+        self.assertTrue(only_backup.exists())
+
+    def test_ignores_files_not_matching_backup_pattern(self):
+        unrelated = self.backup_dir / "notes.txt"
+        unrelated.write_text("not a backup")
+        self._make_backup("hoyo-20260101-000000.db", age_seconds=0)
+
+        with patch("scripts.backup_db.BACKUP_DIR", self.backup_dir):
+            with patch("scripts.backup_db.KEEP_BACKUPS", 0):
+                cleanup_old_backups()
+
+        self.assertTrue(unrelated.exists())
+
 
 if __name__ == "__main__":
     unittest.main()
